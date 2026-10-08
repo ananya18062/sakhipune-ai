@@ -1,0 +1,45 @@
+# .vercelignore — files excluded from the Vercel deployment bundle
+
+# Python byte-compiled files
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+backend/venv/
+
+# Test files (not needed in production)
+backend/tests/
+backend/.pytest_cache/
+backend/evaluation/
+backend/load_resources.py
+
+# Development-only scripts
+backend/check_recommend.py
+backend/quick_check.py
+backend/benchmark_ranking.py
+backend/inspect_*.py
+
+# Desktop generation scripts (not part of the project)
+generate_ppt.py
+generate_viva_doc.py
+
+# Secrets — never deploy
+backend/.env
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Hand gesture module (separate project, not part of the web app)
+hand_gesture_recognition/

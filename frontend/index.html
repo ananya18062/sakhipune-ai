@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SakhiPune AI</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="SakhiPune AI home">
+            <span class="brand-mark" aria-hidden="true">S</span>
+            <span>
+                <strong>SakhiPune</strong><span class="brand-accent"> AI</span>
+                <small>Support, made personal</small>
+            </span>
+        </a>
+        <nav class="site-nav" aria-label="Primary navigation">
+            <a href="#explore">Explore support</a>
+            <a href="#about">About SakhiPune</a>
+            <label class="language-select">
+                <span class="sr-only">Select language</span>
+                <select id="language-selector" aria-label="Select language">
+                    <option value="en">English</option>
+                    <option value="hi">Hindi</option>
+                    <option value="mr">Marathi</option>
+                </select>
+            </label>
+            <button type="button" id="login-button" class="login-button">Sign in</button>
+        </nav>
+    </header>
+
+    <div id="login-modal" class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-heading" hidden>
+        <div class="login-dialog">
+            <button type="button" id="close-login" class="login-close" aria-label="Close sign in">&times;</button>
+            <p class="eyebrow">Your SakhiPune session</p>
+            <h2 id="login-heading">Sign in to continue</h2>
+            <p class="login-note">This lightweight frontend session is for this browser tab only. No password is stored.</p>
+            <form id="login-form" novalidate>
+                <label for="login-name">Your name</label>
+                <input id="login-name" name="login-name" type="text" autocomplete="name" required />
+                <label for="login-email">Email address</label>
+                <input id="login-email" name="login-email" type="email" autocomplete="email" required />
+                <p id="login-validation" class="validation-msg" aria-live="polite"></p>
+                <button type="submit" class="questions-submit">Continue as me</button>
+            </form>
+        </div>
+    </div>
+
+    <main>
+        <section class="hero" aria-labelledby="hero-heading">
+            <div class="hero-copy">
+                <p class="eyebrow"><span class="eyebrow-dot"></span> Pune's support discovery companion</p>
+                <h1 id="hero-heading">Your Support.<br /><em>Your Choices.</em><br />Your Sakhi.</h1>
+                <p class="hero-text">Find personalized support, opportunities and resources across Pune.</p>
+                <a class="hero-link" href="#explore">Start exploring <span aria-hidden="true">&#8594;</span></a>
+            </div>
+            <div class="hero-art" aria-hidden="true">
+                <div class="orbit orbit-one"></div>
+                <div class="orbit orbit-two"></div>
+                <div class="hero-spark spark-one">&#10022;</div>
+                <div class="hero-spark spark-two">&#10022;</div>
+                <div class="hero-note note-one">Made for<br /><strong>every next step</strong></div>
+                <div class="hero-note note-two">10 ways<br /><strong>to find support</strong></div>
+                <div class="hero-seal">Sakhi<br /><span>पुणे</span></div>
+            </div>
+        </section>
+
+        <section class="explore-section" id="explore" aria-labelledby="explore-heading">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Begin with a direction</p>
+                    <h2 id="explore-heading">What are you looking for today?</h2>
+                </div>
+                <p class="section-hint">Choose a topic, or share what is on your mind below.</p>
+            </div>
+            <div class="category-grid" aria-label="Support categories">
+                <button class="category-card category-card--coral" type="button" data-category="Jobs" data-query="I am looking for jobs" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#128188;</span><span class="category-title">Jobs</span><span class="category-description">Find employment opportunities and career support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--lavender" type="button" data-category="Internships" data-query="I am looking for internships" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#128187;</span><span class="category-title">Internships</span><span class="category-description">Explore internship and skill-building support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--mint" type="button" data-category="Education &amp; Scholarships" data-query="I need education and scholarship support" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#127891;</span><span class="category-title">Education &amp; Scholarships</span><span class="category-description">Find education, scholarship and learning support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--butter" type="button" data-category="Legal Help" data-query="I need legal help" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#9878;</span><span class="category-title">Legal Help</span><span class="category-description">Understand your rights and find legal guidance.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--sky" type="button" data-category="Healthcare" data-query="I need healthcare support" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#9877;</span><span class="category-title">Healthcare</span><span class="category-description">Connect with health and wellness support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--rose" type="button" data-category="Counselling" data-query="I need counselling support" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#128172;</span><span class="category-title">Counselling</span><span class="category-description">Find a listening ear and emotional support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--red" type="button" data-category="Safety &amp; Emergency" data-query="I need safety and emergency support" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#128680;</span><span class="category-title">Safety &amp; Emergency</span><span class="category-description">Get urgent safety guidance and support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--peach" type="button" data-category="Financial Support" data-query="I need financial support" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#8377;</span><span class="category-title">Financial Support</span><span class="category-description">Explore financial guidance and assistance.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--lilac" type="button" data-category="Shelter" data-query="I need shelter support" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#127968;</span><span class="category-title">Shelter</span><span class="category-description">Find safe shelter and housing support.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="category-card category-card--green" type="button" data-category="Government Schemes" data-query="I am looking for government schemes" aria-pressed="false">
+                    <span class="category-icon" aria-hidden="true">&#127963;</span><span class="category-title">Government Schemes</span><span class="category-description">Discover schemes and public support programs.</span><span class="category-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+            </div>
+            <div class="category-actions">
+                <span id="category-validation" class="validation-msg" aria-live="polite"></span>
+                <button type="button" id="continue-btn" class="continue-btn">Continue <span aria-hidden="true">&#8594;</span></button>
+            </div>
+        </section>
+
+        <section class="query-card" aria-labelledby="query-heading">
+            <div class="query-card__intro">
+                <p class="eyebrow">A little more context</p>
+                <h2 id="query-heading">Or tell us in your own words</h2>
+                <p>There is no wrong way to ask. SakhiPune AI will help you find a useful next step.</p>
+            </div>
+            <section id="questions-panel" class="questions-panel" aria-live="polite" hidden></section>
+            <form id="query-form" novalidate>
+                <label for="user-query" class="sr-only">Describe your concern or what you are looking for</label>
+                <textarea id="user-query" name="user-query" rows="4" placeholder="Describe your concern or what you are looking for..." autocomplete="off"></textarea>
+                <div class="voice-controls">
+                    <button type="button" id="voice-button" class="voice-button" aria-pressed="false" title="Ask using your voice"><span aria-hidden="true">&#127908;</span> Ask by voice</button>
+                    <span id="voice-status" class="voice-status" aria-live="polite"></span>
+                </div>
+                <div class="form-footer">
+                    <span id="validation-msg" class="validation-msg" aria-live="polite"></span>
+                <button type="submit" id="submit-btn" aria-label="Find My Support"><span aria-hidden="true">&#10024;</span> Find My Support</button>
+                </div>
+            </form>
+        </section>
+
+        <p id="loading-msg" class="loading-msg" role="status" aria-live="polite" aria-label="Finding support resources" hidden><span class="loader" aria-hidden="true"></span> &#10024; SakhiPune AI is finding relevant support for you...</p>
+        <section id="results-section" class="results-section" aria-live="polite"></section>
+    </main>
+
+    <footer id="about">
+        <div class="footer-brand"><span class="brand-mark" aria-hidden="true">S</span><strong>SakhiPune AI</strong></div>
+        <p>Built for women of Pune</p>
+        <p class="footer-note">A personalized way to discover support, opportunities and resources.</p>
+    </footer>
+
+    <script src="js/questions.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# SakhiPune AI — Python dependencies
+# Install:  pip install -r requirements.txt
+
+# Web framework
+fastapi==0.111.0
+uvicorn==0.29.0                  # local dev only; Vercel uses its own ASGI runtime
+
+# Data validation
+pydantic==2.7.1
+pydantic-settings==2.2.1
+
+# Database
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+
+# NLP — spaCy 3.8.x + matching model
+spacy==3.8.15
+# spaCy English model installed as a pip package (required on Vercel — cannot run `python -m spacy download`)
+# Version 3.8.0 is compatible with spaCy 3.8.x
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+# Machine learning
+scikit-learn==1.4.2
+
+# Data handling
+pandas==2.2.2
+numpy==1.26.4
+
+# HTTP utilities (required by FastAPI)
+httpx==0.27.0
+
+# Environment variables
+python-dotenv==1.0.1

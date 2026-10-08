@@ -1,0 +1,69 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+backend/venv/
+*/venv/
+
+# ── Environment variables — NEVER commit real secrets ─────────────────────────
+backend/.env
+.env
+*.env
+!*.env.example
+
+# ── IDE and editors ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+*.coverage
+coverage.xml
+
+# ── Vercel ────────────────────────────────────────────────────────────────────
+.vercel/
+.vercel
+
+# ── Node (if Vercel CLI is installed locally) ─────────────────────────────────
+node_modules/
+.npm
+package-lock.json
+
+# ── Desktop generated files (not part of the project) ────────────────────────
+generate_ppt.py
+generate_viva_doc.py
+SakhiPune_AI.pptx
+SakhiPune_AI_Viva_Prep.docx
+final_check.py
+final_check_*.py
+local_test.py
+check_index.py
+benchmark_ranking.py
+inspect_*.py
+
+# ── Python byte-compiled (extra safety) ──────────────────────────────────────
+*.pyc
+*.pycache
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
