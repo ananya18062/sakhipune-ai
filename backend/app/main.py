@@ -47,8 +47,10 @@ app.add_middleware(
     allow_headers=["Content-Type", "Accept"],
 )
 
-# All routes are defined in routes.py and registered here
-app.include_router(router)
+# All routes are defined in routes.py and registered here.
+# Mounted under /api so URLs match on Vercel (/api/recommend etc.)
+# The frontend's apiPath() helper also prepends /api in all environments.
+app.include_router(router, prefix="/api")
 
 
 @app.exception_handler(RequestValidationError)

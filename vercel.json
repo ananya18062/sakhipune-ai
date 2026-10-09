@@ -16,7 +16,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "index.py/$1"
+      "dest": "index.py"
     },
     {
       "src": "/(.*\\.(css|js|png|ico|svg|woff|woff2|ttf))",

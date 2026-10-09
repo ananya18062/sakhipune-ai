@@ -27,15 +27,11 @@ const API_BASE = (function () {
 }());
 
 // ── API path helper ───────────────────────────────────────────────────────────
-// On Vercel: API_BASE="" and all FastAPI routes are mounted under /api
-// Locally:   API_BASE="http://127.0.0.1:8000" and routes are at root (no /api prefix)
+// FastAPI router is mounted under /api in all environments.
+// On Vercel: API_BASE="" → calls /api/recommend (same-origin)
+// Locally:   API_BASE="http://127.0.0.1:8000" → calls http://127.0.0.1:8000/api/recommend
 function apiPath(route) {
-    if (API_BASE === "") {
-        // Vercel same-origin: prepend /api prefix
-        return "/api" + route;
-    }
-    // Local: use the full base URL with the existing route
-    return API_BASE + route;
+    return API_BASE + "/api" + route;
 }
 
 const form           = document.getElementById("query-form");
