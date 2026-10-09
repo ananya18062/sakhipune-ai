@@ -11,12 +11,22 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from app.core.config import settings
 
 # ── Engine ────────────────────────────────────────────────────────────────────
-# DATABASE_URL comes from config (loaded from .env)
+# DATABASE_URL comes from config (loaded from .env or Vercel environment vars).
 # pool_pre_ping=True checks the connection is alive before each use —
-# this prevents errors if PostgreSQL restarts while the app is running
+# this prevents errors if PostgreSQL restarts while the app is running.
+#
+# connect_args: Neon (and most cloud PostgreSQL) requires SSL.
+# sslmode=require is passed explicitly as a fallback in case it is not
+# already present in the DATABASE_URL query string.
+_db_url = settings.DATABASE_URL
+_connect_args = {}
+if "neon.tech" in _db_url or "sslmode" not in _db_url:
+    _connect_args = {"sslmode": "require"}
+
 engine = create_engine(
-    settings.DATABASE_URL,
+    _db_url,
     pool_pre_ping=True,
+    connect_args=_connect_args,
 )
 
 # ── Session factory ───────────────────────────────────────────────────────────
