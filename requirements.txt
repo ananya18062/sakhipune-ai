@@ -3,7 +3,6 @@
 
 # Web framework
 fastapi==0.111.0
-uvicorn==0.29.0
 
 # Data validation
 pydantic==2.7.1
@@ -19,10 +18,6 @@ en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_
 
 # Machine learning
 scikit-learn==1.4.2
-
-# Data handling
-pandas==2.2.2
-numpy==1.26.4
 
 # HTTP utilities (required by FastAPI)
 httpx==0.27.0
