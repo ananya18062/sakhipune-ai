@@ -69,6 +69,10 @@ def _row_to_resource(row: dict) -> SupportResource | None:
         contact=row.get("contact", "").strip() or None,
         language=row.get("language", "").strip() or "en",
         keywords=row.get("keywords", "").strip() or None,
+        # Structured filter metadata — None when the CSV cell is empty (unknown)
+        experience_level=row.get("experience_level", "").strip() or None,
+        work_mode=row.get("work_mode", "").strip() or None,
+        employment_type=row.get("employment_type", "").strip() or None,
     )
 
 

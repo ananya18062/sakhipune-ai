@@ -7,6 +7,24 @@ from sqlalchemy import Column, Integer, String, Text
 
 from app.database.connection import Base
 
+# ── Controlled vocabulary for structured filter columns ───────────────────────
+# experience_level values (NULL = unknown / not applicable)
+EXPERIENCE_LEVELS = {
+    "fresher",          # no experience required
+    "less_than_1",      # < 1 year
+    "1_2_years",        # 1–2 years
+    "3_5_years",        # 3–5 years
+    "6_10_years",       # 6–10 years
+    "more_than_10",     # > 10 years
+    "any",              # any level accepted
+}
+
+# work_mode values (NULL = unknown)
+WORK_MODES = {"remote", "hybrid", "on_site"}
+
+# employment_type values (NULL = unknown / not applicable)
+EMPLOYMENT_TYPES = {"full_time", "part_time", "contract", "apprenticeship", "self_employment"}
+
 
 class SupportResource(Base):
     """
@@ -50,6 +68,21 @@ class SupportResource(Base):
 
     # Comma-separated keywords for matching, e.g. "job,career,skill"
     keywords = Column(Text, nullable=True)
+
+    # ── Structured filter metadata ────────────────────────────────────────────
+    # These columns enable accurate filtering without keyword guessing.
+    # NULL means the information is genuinely unknown — never default to a value.
+
+    # Experience level required, e.g. "fresher", "1_2_years", "any"
+    # See EXPERIENCE_LEVELS for the full vocabulary.
+    experience_level = Column(String(50), nullable=True)
+
+    # Work mode of the opportunity: "remote", "hybrid", "on_site"
+    # NULL = unknown — do NOT include in remote-only results.
+    work_mode = Column(String(20), nullable=True)
+
+    # Employment type: "full_time", "part_time", "contract", "apprenticeship", "self_employment"
+    employment_type = Column(String(30), nullable=True)
 
     def __repr__(self) -> str:
         return f"<SupportResource id={self.id} name='{self.name}' category='{self.category}'>"

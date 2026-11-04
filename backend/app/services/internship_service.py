@@ -62,6 +62,7 @@ from app.services.api_clients.base_client import (
     normalize_resource,
 )
 from app.services.resource_normalizer import orm_to_normalized as _orm_to_normalized
+from app.services.filter_utils import apply_internship_filters
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -192,11 +193,14 @@ def get_internship_resources(
     Flow:
       1. If INTERNSHIPS_API_URL is configured, try a live fetch → normalize.
       2. On any failure, fall back to PostgreSQL.
-      3. Apply soft preference filter (interest_area, work_type).
-      4. Database records are always marked is_live=False.
+      3. Apply soft preference filter (interest_area).
+      4. Apply structured filters (experience_filter, work_mode_filter) with AND logic.
+      5. Database records are always marked is_live=False.
 
     Never raises.
     """
+    prefs = preferences or {}
+
     if _client:
         try:
             raw = fetch_with_fallback(
@@ -206,12 +210,21 @@ def get_internship_resources(
                 fallback_loader=lambda: _load_internships_from_db(db),
                 params={"category": "internship", "location": "Pune"},
             )
-            return _apply_preference_filter(raw, preferences)
         except Exception:
             logger.exception("Unexpected error in internship live fetch; using DB fallback")
+            raw = _load_internships_from_db(db)
+    else:
+        raw = _load_internships_from_db(db)
 
-    raw = _load_internships_from_db(db)
-    return _apply_preference_filter(raw, preferences)
+    # Soft preference filter (interest_area, legacy work_type keyword filter)
+    soft_filtered = _apply_preference_filter(raw, prefs)
+
+    # Structured filter (strict AND logic, unknown excluded)
+    return apply_internship_filters(
+        soft_filtered,
+        experience_filter=prefs.get("experience_filter"),
+        work_mode_filter=prefs.get("work_mode_filter"),
+    )
 
 
 def get_technology_internship_resources(db: Session) -> list[dict[str, Any]]:

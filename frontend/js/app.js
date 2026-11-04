@@ -1,94 +1,102 @@
 // app.js — SakhiPune AI frontend logic
-// Sends user queries to POST /recommend and displays support resources
+// Chat interface, domain selection, query editing, and follow-up context.
 
-// ── Config ────────────────────────────────────────────────────────────────────
-// API base URL strategy:
-//   - On Vercel:  empty string "" → same-origin relative calls (/api/recommend)
-//   - Local dev:  set to "http://127.0.0.1:8000" if the backend runs separately
-//
-// Vercel routes /api/* to the FastAPI serverless function (see vercel.json).
-// When running locally with  uvicorn  on port 8000, override by setting
-// window.__SAKHIPUNE_API__ before this script loads, or keep the fallback below.
+// ── API config ────────────────────────────────────────────────────────────────
 const API_BASE = (function () {
-    // Allow runtime override (e.g. for local dev without modifying this file)
-    if (typeof window.__SAKHIPUNE_API__ !== "undefined") {
-        return window.__SAKHIPUNE_API__;
-    }
-    // On Vercel the frontend and API are on the same domain → use relative path
-    // On local http.server (port 8080) the API is on a different port → use absolute
-    const isLocal = window.location.hostname === "127.0.0.1" ||
-                    window.location.hostname === "localhost";
+    if (typeof window.__SAKHIPUNE_API__ !== "undefined") return window.__SAKHIPUNE_API__;
+    const isLocal = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
     const isFileProtocol = window.location.protocol === "file:";
-    if (isLocal || isFileProtocol) {
-        return "http://127.0.0.1:8000";
-    }
-    // Production / Vercel: same-origin, API is under /api prefix
-    return "";
+    return (isLocal || isFileProtocol) ? "http://127.0.0.1:8000" : "";
 }());
 
-// ── API path helper ───────────────────────────────────────────────────────────
-// FastAPI router is mounted under /api in all environments.
-// On Vercel: API_BASE="" → calls /api/recommend (same-origin)
-// Locally:   API_BASE="http://127.0.0.1:8000" → calls http://127.0.0.1:8000/api/recommend
 function apiPath(route) {
     return API_BASE + "/api" + route;
 }
 
-const form           = document.getElementById("query-form");
-const input          = document.getElementById("user-query");
-const validationMsg  = document.getElementById("validation-msg");
-const loadingMsg     = document.getElementById("loading-msg");
-const resultsSection = document.getElementById("results-section");
-const submitBtn      = document.getElementById("submit-btn");
-const categoryButtons = document.querySelectorAll(".category-card");
-const continueBtn = document.getElementById("continue-btn");
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const form              = document.getElementById("query-form");
+const input             = document.getElementById("user-query");
+const validationMsg     = document.getElementById("validation-msg");
+const loadingMsg        = document.getElementById("loading-msg");
+const resultsSection    = document.getElementById("results-section");
+const submitBtn         = document.getElementById("submit-btn");
+const categoryButtons   = document.querySelectorAll(".category-card");
+const continueBtn       = document.getElementById("continue-btn");
 const categoryValidation = document.getElementById("category-validation");
-const questionsPanel = document.getElementById("questions-panel");
-const queryCard = document.querySelector(".query-card");
-const languageSelector = document.getElementById("language-selector");
-const loginButton = document.getElementById("login-button");
-const loginModal = document.getElementById("login-modal");
-const closeLogin = document.getElementById("close-login");
-const loginForm = document.getElementById("login-form");
-const loginValidation = document.getElementById("login-validation");
-const voiceButton = document.getElementById("voice-button");
-const voiceStatus = document.getElementById("voice-status");
-let selectedCategory = null;
-let selectedAnswers = {};
-let selectedLanguage = languageSelector.value;
-let speechRecognition = null;
-let voiceBaseText = "";
-let lastSupportRequest = null;
+const questionsPanel    = document.getElementById("questions-panel");
+const queryCard         = document.querySelector(".query-card");
+const languageSelector  = document.getElementById("language-selector");
+const loginButton       = document.getElementById("login-button");
+const loginModal        = document.getElementById("login-modal");
+const closeLogin        = document.getElementById("close-login");
+const loginForm         = document.getElementById("login-form");
+const loginValidation   = document.getElementById("login-validation");
+const voiceButton       = document.getElementById("voice-button");
+const voiceStatus       = document.getElementById("voice-status");
 
+// ── Conversation state ────────────────────────────────────────────────────────
+// This is the single source of truth for the current chat session.
+let conversationState = {
+    turns: [],           // { role, content, request, response } objects
+    selectedCategory: null,
+    selectedAnswers: {},
+    selectedLanguage: "en",
+    accumulatedFilters: {},
+    lastIntent: null,
+    lastQuery: null,
+    editingTurnIndex: null,  // non-null when user is editing a previous message
+};
+
+function resetConversation() {
+    conversationState = {
+        turns: [],
+        selectedCategory: null,
+        selectedAnswers: {},
+        selectedLanguage: languageSelector.value || "en",
+        accumulatedFilters: {},
+        lastIntent: null,
+        lastQuery: null,
+        editingTurnIndex: null,
+    };
+    categoryButtons.forEach(function (b) {
+        b.classList.remove("is-selected");
+        b.setAttribute("aria-pressed", "false");
+    });
+    categoryValidation.textContent = "";
+    questionsPanel.replaceChildren();
+    questionsPanel.hidden = true;
+    queryCard.classList.remove("has-questions");
+    input.value = "";
+    clearValidationError();
+    resultsSection.replaceChildren();
+    renderChatHistory();
+}
+
+// ── Language ──────────────────────────────────────────────────────────────────
 languageSelector.addEventListener("change", function () {
-    selectedLanguage = languageSelector.value;
-    document.documentElement.lang = selectedLanguage;
-    if (speechRecognition) {
-        speechRecognition.lang = getSpeechLanguage(selectedLanguage);
-    }
+    conversationState.selectedLanguage = languageSelector.value;
+    document.documentElement.lang = languageSelector.value;
+    if (speechRecognition) speechRecognition.lang = getSpeechLanguage(languageSelector.value);
 });
 
-function getSpeechLanguage(language) {
-    return { en: "en-IN", hi: "hi-IN", mr: "mr-IN" }[language] || "en-IN";
+function getSpeechLanguage(lang) {
+    return { en: "en-IN", hi: "hi-IN", mr: "mr-IN" }[lang] || "en-IN";
 }
 
-function setVoiceStatus(message) {
-    voiceStatus.textContent = message;
-}
+// ── Voice ─────────────────────────────────────────────────────────────────────
+let speechRecognition = null;
+let voiceBaseText = "";
+
+function setVoiceStatus(msg) { voiceStatus.textContent = msg; }
 
 function setupVoiceRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-        voiceButton.disabled = true;
-        setVoiceStatus("Voice input is not supported in this browser.");
-        return;
-    }
-
-    speechRecognition = new SpeechRecognition();
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { voiceButton.disabled = true; setVoiceStatus("Voice input is not supported in this browser."); return; }
+    speechRecognition = new SR();
     speechRecognition.continuous = false;
     speechRecognition.interimResults = false;
     speechRecognition.maxAlternatives = 3;
-    speechRecognition.lang = getSpeechLanguage(selectedLanguage);
+    speechRecognition.lang = getSpeechLanguage(conversationState.selectedLanguage);
 
     speechRecognition.onstart = function () {
         voiceBaseText = input.value.trim();
@@ -97,13 +105,9 @@ function setupVoiceRecognition() {
         voiceButton.innerHTML = '<span aria-hidden="true">&#9632;</span> Listening...';
         setVoiceStatus("Speak your question now.");
     };
-
     speechRecognition.onresult = function (event) {
         const result = event.results[event.resultIndex];
-        const alternatives = Array.from(result || []);
-        const best = alternatives.sort(function (left, right) {
-            return (right.confidence || 0) - (left.confidence || 0);
-        })[0];
+        const best = Array.from(result || []).sort(function (a, b) { return (b.confidence || 0) - (a.confidence || 0); })[0];
         const transcript = best ? best.transcript.trim().replace(/\s+/g, " ") : "";
         if (transcript) {
             input.value = [voiceBaseText, transcript].filter(Boolean).join(" ");
@@ -111,122 +115,88 @@ function setupVoiceRecognition() {
         }
         clearValidationError();
     };
-
-    speechRecognition.onnomatch = function () {
-        setVoiceStatus("No clear speech was detected. Please try again.");
-    };
-
+    speechRecognition.onnomatch = function () { setVoiceStatus("No clear speech detected. Please try again."); };
     speechRecognition.onerror = function (event) {
-        const message = event.error === "not-allowed"
-            ? "Microphone permission was not granted."
-            : "Voice input could not be understood. Please try again.";
-        setVoiceStatus(message);
+        setVoiceStatus(event.error === "not-allowed" ? "Microphone permission was not granted." : "Voice input could not be understood. Please try again.");
     };
-
     speechRecognition.onend = function () {
         voiceButton.classList.remove("is-listening");
         voiceButton.setAttribute("aria-pressed", "false");
         voiceButton.innerHTML = '<span aria-hidden="true">&#127908;</span> Ask by voice';
     };
-
     voiceButton.addEventListener("click", function () {
-        if (voiceButton.classList.contains("is-listening")) {
-            speechRecognition.stop();
-            return;
-        }
+        if (voiceButton.classList.contains("is-listening")) { speechRecognition.stop(); return; }
         setVoiceStatus("");
-        speechRecognition.lang = getSpeechLanguage(selectedLanguage);
+        speechRecognition.lang = getSpeechLanguage(conversationState.selectedLanguage);
         speechRecognition.start();
     });
 }
-
 setupVoiceRecognition();
 
-function openLoginModal() {
-    loginModal.hidden = false;
-    document.getElementById("login-name").focus();
-}
-
-function closeLoginModal() {
-    loginModal.hidden = true;
-    loginValidation.textContent = "";
-}
+// ── Login modal ───────────────────────────────────────────────────────────────
+function openLoginModal() { loginModal.hidden = false; document.getElementById("login-name").focus(); }
+function closeLoginModal() { loginModal.hidden = true; loginValidation.textContent = ""; }
 
 function updateSessionButton() {
-    const sessionName = sessionStorage.getItem("sakhipune_session_name");
-    loginButton.textContent = sessionName ? "Log out" : "Sign in";
-    loginButton.setAttribute("aria-label", sessionName ? "Log out" : "Sign in");
+    const name = sessionStorage.getItem("sakhipune_session_name");
+    loginButton.textContent = name ? "Log out" : "Sign in";
+    loginButton.setAttribute("aria-label", name ? "Log out" : "Sign in");
 }
 
 loginButton.addEventListener("click", function () {
-    if (sessionStorage.getItem("sakhipune_session_name")) {
-        sessionStorage.removeItem("sakhipune_session_name");
-        updateSessionButton();
-        return;
-    }
+    if (sessionStorage.getItem("sakhipune_session_name")) { sessionStorage.removeItem("sakhipune_session_name"); updateSessionButton(); return; }
     openLoginModal();
 });
 closeLogin.addEventListener("click", closeLoginModal);
-loginModal.addEventListener("click", function (event) {
-    if (event.target === loginModal) {
-        closeLoginModal();
-    }
-});
-
-loginForm.addEventListener("submit", function (event) {
-    event.preventDefault();
+loginModal.addEventListener("click", function (e) { if (e.target === loginModal) closeLoginModal(); });
+loginForm.addEventListener("submit", function (e) {
+    e.preventDefault();
     const name = document.getElementById("login-name").value.trim();
     const email = document.getElementById("login-email").value.trim();
-    if (!name || !email || !loginForm.checkValidity()) {
-        loginValidation.textContent = "Please enter your name and a valid email address.";
-        return;
-    }
+    if (!name || !email || !loginForm.checkValidity()) { loginValidation.textContent = "Please enter your name and a valid email address."; return; }
     sessionStorage.setItem("sakhipune_session_name", name);
     updateSessionButton();
     closeLoginModal();
 });
-
 updateSessionButton();
 
-// Category selection only prepares the next step; it does not call the API.
+// ── Category selection ────────────────────────────────────────────────────────
 categoryButtons.forEach(function (button) {
     button.addEventListener("click", function () {
-        selectedCategory = {
+        conversationState.selectedCategory = {
             name: button.dataset.category,
             query: button.dataset.query || "",
         };
-        selectedAnswers = {};
+        // When domain changes, clear incompatible accumulated filters
+        if (conversationState.lastIntent) {
+            conversationState.accumulatedFilters = {};
+        }
+        conversationState.selectedAnswers = {};
         input.value = "";
         questionsPanel.replaceChildren();
         questionsPanel.hidden = true;
         queryCard.classList.remove("has-questions");
 
-        categoryButtons.forEach(function (categoryButton) {
-            const isSelected = categoryButton === button;
-            categoryButton.classList.toggle("is-selected", isSelected);
-            categoryButton.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        categoryButtons.forEach(function (b) {
+            const sel = b === button;
+            b.classList.toggle("is-selected", sel);
+            b.setAttribute("aria-pressed", sel ? "true" : "false");
         });
         categoryValidation.textContent = "";
     });
 });
 
 continueBtn.addEventListener("click", function () {
-    if (!selectedCategory) {
-        categoryValidation.textContent = "Please select a support category to continue.";
-        return;
-    }
-
-    const questionForm = renderQuestions(selectedCategory.name, questionsPanel);
+    if (!conversationState.selectedCategory) { categoryValidation.textContent = "Please select a support category to continue."; return; }
+    const questionForm = renderQuestions(conversationState.selectedCategory.name, questionsPanel);
     queryCard.classList.add("has-questions");
-    questionForm.addEventListener("questions-complete", function (event) {
-        const questions = getQuestionsForCategory(selectedCategory.name);
-        const answers = event.detail.answers;
-        if (!validateAnswers(questions, answers)) {
-            return;
-        }
 
-        selectedAnswers = answers;
-        input.value = buildSupportQuery(selectedCategory.query, answers);
+    questionForm.addEventListener("questions-complete", function (event) {
+        const questions = getQuestionsForCategory(conversationState.selectedCategory.name);
+        const answers = event.detail.answers;
+        if (!validateAnswers(questions, answers)) return;
+        conversationState.selectedAnswers = answers;
+        input.value = buildSupportQuery(conversationState.selectedCategory.query, answers);
         clearValidationError();
         input.focus();
         document.getElementById("query-heading").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -236,261 +206,352 @@ continueBtn.addEventListener("click", function () {
         queryCard.classList.remove("has-questions");
         document.getElementById("explore").scrollIntoView({ behavior: "smooth", block: "center" });
     });
-
     questionsPanel.scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
 function buildSupportQuery(categoryQuery, answers) {
-    const answerSummary = Object.keys(answers)
-        .map(function (key) { return answers[key]; })
-        .join(", ");
-    return categoryQuery + ". My preferences are: " + answerSummary + ".";
+    const summary = Object.values(answers).join(", ");
+    return categoryQuery + ". My preferences are: " + summary + ".";
 }
 
-/**
- * Builds the structured request kept in frontend memory before API integration.
- * @returns {{message: string, category: string, preferences: object, language: string}}
- */
-function buildSupportRequest() {
+function getCategoryKey(category) {
+    const n = String(category || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    const aliases = { education_and_scholarships: "education", legal_help: "legal", safety_and_emergency: "safety", government_schemes: "government_scheme" };
+    return aliases[n] || n;
+}
+
+// ── Follow-up filter extraction ───────────────────────────────────────────────
+// Parse explicit follow-up signals from short messages so we don't need an LLM.
+function extractFollowUpFilters(message) {
+    const m = message.toLowerCase();
+    const filters = {};
+    if (/remote|work from home|wfh/.test(m))    filters.work_mode_filter = "remote";
+    if (/hybrid/.test(m))                         filters.work_mode_filter = "hybrid";
+    if (/on.site|onsite|in.person|offline/.test(m)) filters.work_mode_filter = "on_site";
+    if (/fresher|student|beginner|no experience/.test(m)) filters.experience_filter = "fresher";
+    if (/experienced|senior/.test(m))             filters.experience_filter = "3_5_years";
+    if (/free|no cost|without fee/.test(m))       filters.cost_preference = "free";
+    if (/government|gov|sarkari|official/.test(m)) filters.scheme_type = "government";
+    if (/part.time/.test(m))                      filters.employment_type_filter = "part_time";
+    if (/full.time/.test(m))                      filters.employment_type_filter = "full_time";
+    if (/internship/.test(m))                     filters.employment_type_filter = "apprenticeship";
+    return filters;
+}
+
+// Detect if a message is a short follow-up refinement rather than a new query.
+function isLikelyFollowUp(message) {
+    const wordCount = message.trim().split(/\s+/).length;
+    if (wordCount > 12) return false;  // long messages are likely new queries
+    const followUpPhrases = [
+        /^only /i, /^just /i, /^show (me )?(only|more)/i,
+        /^any free/i, /^i am a /i, /^i'm a /i,
+        /^remote$/i, /^hybrid$/i, /^on.site$/i,
+        /^fresher$/i, /^experienced$/i,
+        /^government (only|schemes)/i,
+        /^(remove|clear|without) /i,
+        /^more options/i, /^something else/i,
+    ];
+    return followUpPhrases.some(function (re) { return re.test(message.trim()); }) || wordCount <= 4;
+}
+
+// ── Form submission ───────────────────────────────────────────────────────────
+form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    const message = input.value.trim();
+    if (!message) { showValidationError("Please describe what you need help with."); input.focus(); return; }
+
+    clearValidationError();
+
+    // Determine if this is a follow-up or a new/edited query
+    const isEditing = conversationState.editingTurnIndex !== null;
+    const hasHistory = conversationState.turns.length > 0;
+    const isFollowUp = !isEditing && hasHistory && isLikelyFollowUp(message);
+
+    // Extract any explicit filter signals from the message
+    const newFilters = extractFollowUpFilters(message);
+    if (isFollowUp) {
+        // Merge new filters into accumulated state
+        Object.assign(conversationState.accumulatedFilters, newFilters);
+    } else if (!isEditing) {
+        // New query — keep category but reset filters unless they come from questions
+        conversationState.accumulatedFilters = Object.assign({}, newFilters);
+    }
+
+    const request = buildChatRequest(message, isFollowUp);
+    await submitChatRequest(request, message, isEditing, isFollowUp);
+});
+
+input.addEventListener("input", function () { if (input.value.trim()) clearValidationError(); });
+
+function buildChatRequest(message, isFollowUp) {
+    const state = conversationState;
+    const prefs = Object.assign({}, state.selectedAnswers, state.accumulatedFilters);
+
+    // Build conversation state to send to the backend
+    const backendState = {
+        intent: state.lastIntent,
+        last_query: state.lastQuery,
+        filters: state.accumulatedFilters,
+    };
+
     return {
-        message: input.value.trim(),
-        category: selectedCategory ? getCategoryKey(selectedCategory.name) : "",
-        preferences: Object.assign({}, selectedAnswers),
-        language: selectedLanguage,
+        message: message,
+        category: state.selectedCategory ? getCategoryKey(state.selectedCategory.name) : null,
+        language: state.selectedLanguage,
+        preferences: Object.keys(prefs).length ? prefs : null,
+        conversation_state: (state.lastIntent || state.lastQuery) ? backendState : null,
+        is_followup: isFollowUp,
     };
 }
 
-/**
- * Validates the structured support request without storing personal information.
- * @param {object} request
- * @returns {{valid: boolean, errors: string[]}}
- */
-function validateSupportRequest(request) {
-    const errors = [];
-
-    if (!request.category) {
-        errors.push("Please select a support category to continue.");
-    }
-    if (!request.message) {
-        errors.push("Please describe what you need help with.");
+async function submitChatRequest(request, userMessage, isEditing, isFollowUp) {
+    // If editing, truncate conversation history from the edited turn
+    if (isEditing) {
+        conversationState.turns = conversationState.turns.slice(0, conversationState.editingTurnIndex);
+        conversationState.editingTurnIndex = null;
     }
 
-    const questions = getQuestionsForCategory(request.category);
-    questions.forEach(function (question) {
-        if (!request.preferences[question.id]) {
-            errors.push("Please complete the required questions.");
-        }
-    });
+    // Add user turn to history
+    const userTurn = { role: "user", content: userMessage, isFollowUp: isFollowUp };
+    conversationState.turns.push(userTurn);
+    conversationState.lastQuery = userMessage;
 
-    return { valid: errors.length === 0, errors: errors };
-}
-
-/**
- * Clears the current support flow from the page and frontend memory.
- */
-function resetSupportFlow() {
-    selectedCategory = null;
-    selectedAnswers = {};
-    input.value = "";
-    clearValidationError();
-    categoryValidation.textContent = "";
-    questionsPanel.replaceChildren();
-    questionsPanel.hidden = true;
-    queryCard.classList.remove("has-questions");
-    categoryButtons.forEach(function (button) {
-        button.classList.remove("is-selected");
-        button.setAttribute("aria-pressed", "false");
-    });
-}
-
-// ── Form submit handler ───────────────────────────────────────────────────────
-
-form.addEventListener("submit", async function (event) {
-    event.preventDefault();
-
-    const supportRequest = buildSupportRequest();
-    const validation = validateSupportRequest(supportRequest);
-    if (!validation.valid) {
-        showValidationError(validation.errors[0]);
-        input.focus();
-        return;
-    }
-
-    clearValidationError();
-    lastSupportRequest = supportRequest;
     setLoadingState(true);
+    renderChatHistory();
+
     try {
-        await fetchRecommendations(supportRequest);
-    } finally {
-        setLoadingState(false);
-    }
-});
-
-// Clear validation error as soon as the user starts typing again
-input.addEventListener("input", function () {
-    if (input.value.trim()) {
-        clearValidationError();
-    }
-});
-
-// ── Core fetch function ───────────────────────────────────────────────────────
-
-/**
- * POSTs the structured support request to the existing /recommend endpoint.
- * On success, renders the intent summary + resource cards.
- * On failure, renders a friendly, specific error message.
- *
- * Error categories handled separately:
- *   - Network / backend unreachable  → "SakhiPune AI is temporarily unavailable"
- *   - 422 Validation error           → "Please check your query and try again"
- *   - 503 Service unavailable        → "SakhiPune AI is temporarily unavailable"
- *   - Other 4xx / 5xx               → "Something went wrong. Please try again."
- *   - Malformed JSON response        → "Unexpected response" (logged to console)
- *   - Empty recommendations list     → friendly no-results message
- *
- * @param {object} supportRequest
- */
-async function fetchRecommendations(supportRequest) {
-    let response;
-    try {
-        response = await fetch(apiPath("/recommend"), {
+        const response = await fetch(apiPath("/chat"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(supportRequest),
+            body: JSON.stringify(request),
         });
-    } catch (networkError) {
-        // fetch() itself threw — backend is unreachable (not started, wrong port, CORS preflight blocked)
-        console.error("[SakhiPune] Network error:", networkError);
-        showErrorResult(
-            "SakhiPune AI is temporarily unavailable. " +
-            "Please make sure the backend server is running and try again."
-        );
-        return;
-    }
 
-    // Backend responded — check HTTP status before parsing body
-    if (!response.ok) {
-        let errorBody = null;
-        try { errorBody = await response.json(); } catch (_) { /* non-JSON error body */ }
-
-        console.warn("[SakhiPune] HTTP", response.status, errorBody);
-
-        if (response.status === 422) {
-            const detail = errorBody && errorBody.message
+        if (!response.ok) {
+            let errorBody = null;
+            try { errorBody = await response.json(); } catch (_) {}
+            const msg = (response.status === 422 && errorBody && errorBody.message)
                 ? errorBody.message
-                : "Please check your query and try again.";
-            showErrorResult(detail);
-            return;
+                : response.status === 503
+                    ? "SakhiPune AI is temporarily unavailable. Please try again shortly."
+                    : "Something went wrong. Please try again.";
+            conversationState.turns.push({ role: "assistant", content: msg, isError: true, recommendations: [] });
+            conversationState.lastIntent = null;
+        } else {
+            const data = await response.json();
+            if (!data.intent || !Array.isArray(data.recommendations)) {
+                conversationState.turns.push({ role: "assistant", content: "We received an unexpected response. Please try again.", isError: true, recommendations: [] });
+            } else {
+                conversationState.lastIntent = data.intent;
+                // Update accumulated filters with any detected intent
+                if (data.intent && data.intent !== "general") {
+                    conversationState.accumulatedFilters._last_intent = data.intent;
+                }
+                const assistantContent = buildAssistantMessage(data, isFollowUp);
+                conversationState.turns.push({
+                    role: "assistant",
+                    content: assistantContent,
+                    isError: false,
+                    recommendations: data.recommendations,
+                    intent: data.intent,
+                    confidence: data.confidence,
+                    matchScore: data.match_score,
+                    isFollowUp: isFollowUp,
+                });
+            }
         }
-        if (response.status === 503) {
-            showErrorResult("SakhiPune AI is temporarily unavailable. Please try again shortly.");
-            return;
-        }
-        showErrorResult("Something went wrong. Please try again.");
-        return;
+    } catch (networkError) {
+        console.error("[SakhiPune] Network error:", networkError);
+        conversationState.turns.push({
+            role: "assistant",
+            content: "SakhiPune AI is temporarily unavailable. Please make sure you are online and try again.",
+            isError: true,
+            recommendations: [],
+        });
+        conversationState.lastIntent = null;
+    } finally {
+        setLoadingState(false);
+        input.value = "";
+        renderChatHistory();
+        // Scroll to latest message
+        const chatContainer = document.getElementById("chat-container");
+        if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
     }
-
-    // Parse JSON
-    let data;
-    try {
-        data = await response.json();
-    } catch (parseError) {
-        console.error("[SakhiPune] JSON parse error:", parseError);
-        showErrorResult("We received an unexpected response. Please try again.");
-        return;
-    }
-
-    // Guard: ensure required fields are present
-    if (!data.intent || data.confidence === undefined || !Array.isArray(data.recommendations)) {
-        console.error("[SakhiPune] Unexpected response shape:", data);
-        showErrorResult("We received an unexpected response. Please try again.");
-        return;
-    }
-
-    renderResults(data);
 }
 
-// ── Render functions ──────────────────────────────────────────────────────────
+function buildAssistantMessage(data, isFollowUp) {
+    if (data.recommendations.length === 0) {
+        return "No matching resources were found for your query. Try rephrasing, selecting a different category, or removing some filters.";
+    }
+    const count = data.recommendations.length;
+    const intentLabel = formatIntent(data.intent);
+    if (isFollowUp) {
+        return "Here are " + count + " updated result" + (count !== 1 ? "s" : "") + " based on your refinement:";
+    }
+    return "Here are " + count + " support resource" + (count !== 1 ? "s" : "") + " for " + intentLabel + ":";
+}
 
-/**
- * Renders the full results area:
- *   - Intent summary bar (detected need + confidence)
- *   - One resource card per recommendation
- *   - "No results" message if recommendations list is empty
- *
- * Uses safe DOM manipulation — no raw user text injected via innerHTML.
- *
- * @param {object} data - { message, intent, confidence, recommendations }
- */
-function renderResults(data) {
-    // Clear previous results using safe DOM method
+// ── Chat history rendering ────────────────────────────────────────────────────
+function renderChatHistory() {
     resultsSection.replaceChildren();
 
-    const successMessage = document.createElement("p");
-    successMessage.className = "results-success";
-    successMessage.textContent = "Here are support options that match your needs.";
-    resultsSection.appendChild(successMessage);
+    const turns = conversationState.turns;
+    if (turns.length === 0) return;
 
-    // ── Intent summary card ───────────────────────────────────────────────────
-    const summaryCard = document.createElement("div");
-    summaryCard.className = "intent-summary";
+    // Chat container
+    const chat = document.createElement("div");
+    chat.id = "chat-container";
+    chat.className = "chat-container";
 
-    const needLabel = document.createElement("span");
-    needLabel.className = "intent-summary__label";
-    needLabel.textContent = "Detected Need:";
-
-    const needValue = document.createElement("span");
-    needValue.className = "intent-summary__value";
-    needValue.textContent = formatIntent(data.intent);
-
-    const scoreLabel = document.createElement("span");
-    scoreLabel.className = "intent-summary__label";
-    scoreLabel.textContent = "Match Score:";
-
-    const scoreValue = document.createElement("span");
-    scoreValue.className = "intent-summary__value";
-    const matchScore = data.match_score !== undefined
-        ? data.match_score
-        : (data.recommendations[0] && data.recommendations[0].score) || 0;
-    scoreValue.textContent = Math.round(matchScore * 100) + "%";
-
-    summaryCard.appendChild(needLabel);
-    summaryCard.appendChild(needValue);
-    summaryCard.appendChild(scoreLabel);
-    summaryCard.appendChild(scoreValue);
-    resultsSection.appendChild(summaryCard);
-
-    // ── Resource cards or "no results" message ────────────────────────────────
-    if (data.recommendations.length === 0) {
-        const noResult = document.createElement("div");
-        noResult.className = "result-card result-card--empty";
-        const msg = document.createElement("p");
-        msg.textContent = "No matching support resources were found for your query. Try rephrasing or selecting a different category.";
-        noResult.appendChild(msg);
-        resultsSection.appendChild(noResult);
-        resultsSection.appendChild(buildRecoveryActions());
-        return;
-    }
-
-    data.recommendations.forEach(function (resource) {
-        resultsSection.appendChild(buildResourceCard(resource));
+    turns.forEach(function (turn, index) {
+        if (turn.role === "user") {
+            chat.appendChild(buildUserBubble(turn, index));
+        } else {
+            chat.appendChild(buildAssistantBubble(turn, index));
+        }
     });
 
-    resultsSection.appendChild(buildStartAgainButton());
+    resultsSection.appendChild(chat);
+
+    // Action bar below chat
+    if (turns.length > 0) {
+        resultsSection.appendChild(buildChatActions());
+    }
 }
 
-/**
- * Builds a single resource card element using safe DOM methods.
- * No innerHTML used for user-supplied or DB-supplied text.
- *
- * @param {object} resource - { name, category, description, location, contact }
- * @returns {HTMLElement}
- */
+function buildUserBubble(turn, index) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "chat-turn chat-turn--user";
+
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble chat-bubble--user";
+    bubble.textContent = turn.content;
+    if (turn.isFollowUp) {
+        bubble.classList.add("chat-bubble--followup");
+    }
+    wrapper.appendChild(bubble);
+
+    // Edit button for user messages
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "chat-edit-btn";
+    editBtn.setAttribute("aria-label", "Edit this message");
+    editBtn.innerHTML = '<span aria-hidden="true">✏️</span> Edit';
+    editBtn.addEventListener("click", function () {
+        conversationState.editingTurnIndex = index;
+        input.value = turn.content;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        // Visual indicator
+        queryCard.classList.add("is-editing");
+        const indicator = document.getElementById("edit-indicator") || document.createElement("p");
+        indicator.id = "edit-indicator";
+        indicator.className = "edit-indicator";
+        indicator.textContent = "✏️ Editing previous message — submit to replace results from this point.";
+        if (!document.getElementById("edit-indicator")) {
+            form.insertBefore(indicator, form.firstChild);
+        }
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    wrapper.appendChild(editBtn);
+
+    return wrapper;
+}
+
+function buildAssistantBubble(turn) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "chat-turn chat-turn--assistant";
+
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble chat-bubble--assistant" + (turn.isError ? " chat-bubble--error" : "");
+
+    const msgPara = document.createElement("p");
+    msgPara.className = "chat-bubble__text";
+    msgPara.textContent = turn.content;
+    bubble.appendChild(msgPara);
+
+    // Intent summary if available
+    if (!turn.isError && turn.intent && turn.intent !== "general") {
+        const summary = document.createElement("div");
+        summary.className = "chat-intent-summary";
+        const intentSpan = document.createElement("span");
+        intentSpan.className = "chat-intent-tag";
+        intentSpan.textContent = formatIntent(turn.intent);
+        const scoreSpan = document.createElement("span");
+        scoreSpan.className = "chat-score-tag";
+        scoreSpan.textContent = "Match: " + Math.round((turn.matchScore || 0) * 100) + "%";
+        summary.appendChild(intentSpan);
+        summary.appendChild(scoreSpan);
+        bubble.appendChild(summary);
+    }
+
+    wrapper.appendChild(bubble);
+
+    // Recommendation cards for this turn
+    if (!turn.isError && turn.recommendations && turn.recommendations.length > 0) {
+        const cardsWrapper = document.createElement("div");
+        cardsWrapper.className = "chat-cards";
+        turn.recommendations.forEach(function (resource) {
+            cardsWrapper.appendChild(buildResourceCard(resource));
+        });
+        wrapper.appendChild(cardsWrapper);
+    } else if (!turn.isError && turn.recommendations && turn.recommendations.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "result-card result-card--empty";
+        const msg = document.createElement("p");
+        msg.textContent = "No matching support resources were found. Try rephrasing or selecting a different category.";
+        empty.appendChild(msg);
+        wrapper.appendChild(empty);
+    }
+
+    return wrapper;
+}
+
+function buildChatActions() {
+    const bar = document.createElement("div");
+    bar.className = "chat-actions-bar";
+
+    // Follow-up hint
+    const hint = document.createElement("p");
+    hint.className = "chat-followup-hint";
+    hint.textContent = "You can refine your search (e.g. \"only remote\", \"I am a fresher\") or start a new search below.";
+    bar.appendChild(hint);
+
+    const buttons = document.createElement("div");
+    buttons.className = "chat-action-buttons";
+
+    const newChat = document.createElement("button");
+    newChat.type = "button";
+    newChat.className = "start-again-button";
+    newChat.textContent = "✦ New Chat";
+    newChat.addEventListener("click", function () {
+        resetConversation();
+        document.getElementById("explore").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    const changeDomain = document.createElement("button");
+    changeDomain.type = "button";
+    changeDomain.className = "start-again-button start-again-button--secondary";
+    changeDomain.textContent = "Change Category";
+    changeDomain.addEventListener("click", function () {
+        conversationState.selectedCategory = null;
+        conversationState.selectedAnswers = {};
+        conversationState.accumulatedFilters = {};
+        categoryButtons.forEach(function (b) { b.classList.remove("is-selected"); b.setAttribute("aria-pressed", "false"); });
+        document.getElementById("explore").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    buttons.appendChild(newChat);
+    buttons.appendChild(changeDomain);
+    bar.appendChild(buttons);
+    return bar;
+}
+
+// ── Resource card builder ─────────────────────────────────────────────────────
 function buildResourceCard(resource) {
     const card = document.createElement("div");
     card.className = "result-card resource-card";
 
-    // Name / title
+    // Name
     const name = document.createElement("h3");
     name.className = "resource-card__name";
     name.textContent = resource.name || "Unnamed Resource";
@@ -502,10 +563,11 @@ function buildResourceCard(resource) {
     badge.textContent = resource.category || "";
     card.appendChild(badge);
 
-    if (resource.score !== undefined && resource.score !== null) {
+    // Match score
+    if (resource.score != null) {
         const score = document.createElement("span");
         score.className = "resource-card__score";
-        score.textContent = "Match score " + Math.round(resource.score * 100) + "%";
+        score.textContent = "Match " + Math.round(resource.score * 100) + "%";
         card.appendChild(score);
     }
 
@@ -517,6 +579,7 @@ function buildResourceCard(resource) {
         card.appendChild(desc);
     }
 
+    // Why it matches
     if (resource.reason) {
         const reason = document.createElement("p");
         reason.className = "resource-card__reason";
@@ -525,146 +588,88 @@ function buildResourceCard(resource) {
     }
 
     // Location
-    if (resource.location) {
-        const loc = buildDetailRow("📍", resource.location);
-        card.appendChild(loc);
-    }
+    if (resource.location) card.appendChild(buildDetailRow("📍", resource.location));
 
     // Contact
     if (resource.contact) {
-        const con = buildDetailRow("📞", resource.contact);
-        card.appendChild(con);
-        card.appendChild(buildContactAction(resource.contact));
+        card.appendChild(buildDetailRow("📞", resource.contact));
     }
+
+    // Source type indicator
+    if (resource.source_type) {
+        const sourceTag = document.createElement("span");
+        sourceTag.className = "resource-card__source-tag resource-card__source-tag--" + resource.source_type;
+        sourceTag.textContent = resource.source_type === "database" ? "Verified database" : resource.source_type;
+        card.appendChild(sourceTag);
+    }
+
+    // Actions row
+    const actions = document.createElement("div");
+    actions.className = "resource-card__actions";
+
+    // Website link (from url field if available, else contact if https)
+    const websiteUrl = resource.url || (resource.contact && /^https?:\/\//.test(resource.contact) ? resource.contact : null);
+    if (websiteUrl) {
+        const webLink = document.createElement("a");
+        webLink.className = "resource-card__action resource-card__action--primary";
+        webLink.href = websiteUrl;
+        webLink.target = "_blank";
+        webLink.rel = "noopener noreferrer";
+        webLink.textContent = "View Official Website";
+        actions.appendChild(webLink);
+    }
+
+    // Contact action
+    if (resource.contact && !websiteUrl) {
+        actions.appendChild(buildContactAction(resource.contact));
+    } else if (resource.contact && websiteUrl && resource.contact !== websiteUrl) {
+        // If both exist and contact is phone/email, show contact button too
+        if (!/^https?:\/\//.test(resource.contact)) {
+            actions.appendChild(buildContactAction(resource.contact));
+        }
+    }
+
+    if (actions.children.length > 0) card.appendChild(actions);
 
     return card;
 }
 
-/**
- * Creates a contact action only from contact information supplied by the API.
- * @param {string} contact
- * @returns {HTMLAnchorElement}
- */
 function buildContactAction(contact) {
     const action = document.createElement("a");
     action.className = "resource-card__action";
-    action.textContent = "Contact resource";
-
-    const trimmedContact = contact.trim();
-    if (/^https?:\/\//i.test(trimmedContact)) {
-        action.href = trimmedContact;
-        action.target = "_blank";
-        action.rel = "noopener noreferrer";
-    } else if (/^[+\d][\d\s().,-]{2,}$/.test(trimmedContact)) {
-        // Matches full numbers (e.g. +91-20-26128000) and short emergency codes (100, 108, 181, 1091)
-        action.href = "tel:" + trimmedContact.replace(/[^+\d]/g, "");
-    } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedContact)) {
-        action.href = "mailto:" + trimmedContact;
+    action.textContent = "Contact Resource";
+    const trimmed = contact.trim();
+    if (/^https?:\/\//i.test(trimmed)) {
+        action.href = trimmed; action.target = "_blank"; action.rel = "noopener noreferrer";
+    } else if (/^[+\d][\d\s().,-]{2,}$/.test(trimmed)) {
+        action.href = "tel:" + trimmed.replace(/[^+\d]/g, "");
+    } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        action.href = "mailto:" + trimmed;
     } else {
         action.removeAttribute("href");
         action.setAttribute("aria-disabled", "true");
         action.classList.add("resource-card__action--text");
     }
-
     return action;
 }
 
-function buildStartAgainButton() {
-    const action = document.createElement("button");
-    action.type = "button";
-    action.className = "start-again-button";
-    action.textContent = "Start Again";
-    action.addEventListener("click", function () {
-        resetSupportFlow();
-        resultsSection.replaceChildren();
-        document.getElementById("explore").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    return action;
-}
-
-function buildRecoveryActions() {
-    const actions = document.createElement("div");
-    actions.className = "result-actions";
-
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "start-again-button";
-    retry.textContent = "Try Again";
-    retry.addEventListener("click", async function () {
-        if (!lastSupportRequest || submitBtn.disabled) return;
-        setLoadingState(true);
-        try {
-            await fetchRecommendations(lastSupportRequest);
-        } finally {
-            setLoadingState(false);
-        }
-    });
-
-    const choose = document.createElement("button");
-    choose.type = "button";
-    choose.className = "start-again-button start-again-button--secondary";
-    choose.textContent = "Choose Another Category";
-    choose.addEventListener("click", function () {
-        resetSupportFlow();
-        resultsSection.replaceChildren();
-        document.getElementById("explore").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-
-    actions.appendChild(retry);
-    actions.appendChild(choose);
-    return actions;
-}
-
-/**
- * Creates a small detail row with an icon and text.
- * @param {string} icon   - Emoji icon
- * @param {string} text   - Detail text
- * @returns {HTMLElement}
- */
 function buildDetailRow(icon, text) {
     const row = document.createElement("p");
     row.className = "resource-card__detail";
-
     const iconSpan = document.createElement("span");
     iconSpan.setAttribute("aria-hidden", "true");
     iconSpan.textContent = icon + " ";
-
-    const textNode = document.createTextNode(text);
-
     row.appendChild(iconSpan);
-    row.appendChild(textNode);
+    row.appendChild(document.createTextNode(text));
     return row;
 }
 
-// ── Generic display helpers ───────────────────────────────────────────────────
-
-/**
- * Renders a user-friendly error card. No stack traces or raw errors shown.
- * @param {string} message
- */
-function showErrorResult(message) {
-    resultsSection.replaceChildren();
-    const card = document.createElement("div");
-    card.className = "result-card result-card--error";
-    const p = document.createElement("p");
-    p.textContent = message;
-    card.appendChild(p);
-    resultsSection.appendChild(card);
-    resultsSection.appendChild(buildStartAgainButton());
-}
-
-/**
- * Shows/hides the loading indicator and disables/enables the submit button.
- * @param {boolean} isLoading
- */
+// ── UI helpers ────────────────────────────────────────────────────────────────
 function setLoadingState(isLoading) {
-    loadingMsg.hidden     = !isLoading;
-    submitBtn.disabled    = isLoading;
+    loadingMsg.hidden = !isLoading;
+    submitBtn.disabled = isLoading;
     submitBtn.setAttribute("aria-label", isLoading ? "Finding support, please wait" : "Find My Support");
-    // Clear then rebuild button content with safe DOM methods
     submitBtn.textContent = "";
-    const icon = document.createElement("span");
-    icon.setAttribute("aria-hidden", "true");
     if (isLoading) {
         const spinner = document.createElement("span");
         spinner.className = "button-spinner";
@@ -672,6 +677,8 @@ function setLoadingState(isLoading) {
         submitBtn.appendChild(spinner);
         submitBtn.appendChild(document.createTextNode(" Finding support..."));
     } else {
+        const icon = document.createElement("span");
+        icon.setAttribute("aria-hidden", "true");
         icon.textContent = "\u2728";
         submitBtn.appendChild(icon);
         submitBtn.appendChild(document.createTextNode(" Find My Support"));
@@ -679,32 +686,26 @@ function setLoadingState(isLoading) {
     resultsSection.setAttribute("aria-busy", isLoading ? "true" : "false");
 }
 
-/**
- * Shows a validation error below the input field.
- * @param {string} message
- */
 function showValidationError(message) {
     validationMsg.textContent = message;
-    input.style.borderColor   = "#c62828";
+    input.style.borderColor = "#c62828";
 }
 
-/**
- * Clears the validation error and resets the input border.
- */
 function clearValidationError() {
     validationMsg.textContent = "";
-    input.style.borderColor   = "";
+    input.style.borderColor = "";
+    // Clear edit indicator if present
+    const indicator = document.getElementById("edit-indicator");
+    if (indicator && conversationState.editingTurnIndex === null) {
+        indicator.remove();
+        queryCard.classList.remove("is-editing");
+    }
 }
 
-/**
- * Converts a snake_case intent into a readable label.
- * "domestic_violence" → "Domestic Violence"
- * @param {string} intent
- * @returns {string}
- */
 function formatIntent(intent) {
-    return intent
-        .split("_")
-        .map(function (word) { return word.charAt(0).toUpperCase() + word.slice(1); })
-        .join(" ");
+    return (intent || "").split("_").map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" ");
 }
+
+// ── Initial render ────────────────────────────────────────────────────────────
+conversationState.selectedLanguage = languageSelector.value || "en";
+renderChatHistory();

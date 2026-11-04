@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.schemas import (
     SupportRequest, UserQuery, IntentResponse,
-    RecommendationAPIResponse, RecommendationItem,
+    RecommendationAPIResponse, RecommendationItem, ChatRequest,
 )
 from app.services.nlp_service import classify_intent
 from app.services.recommendation_service import (
@@ -69,6 +69,10 @@ def _dict_to_orm(d: dict):
     # (tfidf_service.build_resource_text) reads real keyword tokens rather
     # than an empty string when processing category-service results
     r.keywords    = d.get("keywords", "")
+    # Structured filter metadata — preserved for service-layer filter logic
+    r.experience_level = d.get("experience_level")
+    r.work_mode        = d.get("work_mode")
+    r.employment_type  = d.get("employment_type")
     return r
 
 
@@ -128,17 +132,39 @@ def _run_pipeline(
     )
 
 
+def _merge_filters_into_preferences(user_query: "SupportRequest") -> dict:
+    """Merge structured filter fields into the preferences dict.
+
+    This bridges the gap between the new typed filter fields on SupportRequest
+    and the service functions that read them from the preferences dict.
+    The preferences dict is used as the shared carrier throughout the pipeline.
+    """
+    prefs = dict(user_query.preferences or {})
+    # Inject structured filters — only when they are actually set
+    for attr, key in (
+        ("experience_filter",      "experience_filter"),
+        ("work_mode_filter",       "work_mode_filter"),
+        ("employment_type_filter", "employment_type_filter"),
+        ("delivery_mode_filter",   "delivery_mode_filter"),
+    ):
+        value = getattr(user_query, attr, None)
+        if value:
+            prefs[key] = value
+    return prefs
+
+
 def _category_endpoint(
-    user_query: SupportRequest,
+    user_query: "SupportRequest",
     db,
     resources_fn,
     default_category: str,
     endpoint_name: str,
     preferences_kwarg: bool = False,
-) -> RecommendationAPIResponse:
+) -> "RecommendationAPIResponse":
     """Fetch resources from a single service then run the pipeline."""
+    merged_prefs = _merge_filters_into_preferences(user_query)
     try:
-        raw = resources_fn(db, preferences=user_query.preferences) \
+        raw = resources_fn(db, preferences=merged_prefs) \
               if preferences_kwarg else resources_fn(db)
     except SQLAlchemyError:
         logger.exception("Database query failed on /%s", endpoint_name)
@@ -318,7 +344,8 @@ def jobs_sources() -> dict:
 
 @router.post("/jobs", response_model=RecommendationAPIResponse)
 def jobs_recommend(user_query: SupportRequest, db: Session = Depends(get_db)):
-    return _category_endpoint(user_query, db, get_all_employment_resources, "jobs", "jobs")
+    return _category_endpoint(user_query, db, get_all_employment_resources,
+                               "jobs", "jobs", preferences_kwarg=True)
 
 
 # ── Internships ───────────────────────────────────────────────────────────────
@@ -417,3 +444,102 @@ def government_sources() -> dict:
 def government_recommend(user_query: SupportRequest, db: Session = Depends(get_db)):
     return _category_endpoint(user_query, db, get_all_government_resources,
                                "government_scheme", "government")
+
+
+# ── /chat — conversational endpoint with follow-up context support ────────────
+
+@router.post("/chat", response_model=RecommendationAPIResponse)
+def chat_recommend(request: ChatRequest, db: Session = Depends(get_db)) -> RecommendationAPIResponse:
+    """
+    Conversational recommendation endpoint.
+
+    Supports:
+    - Direct natural-language queries
+    - Category-selected queries (domain buttons)
+    - Follow-up refinements (e.g. "only remote", "I am a fresher")
+    - Query editing (replaces previous context)
+
+    When is_followup=True the conversation_state carries the accumulated
+    filters from previous turns. New explicit filters override old ones.
+    Contradictory filters (e.g. switching domains) are detected and cleared.
+    """
+    # ── Step 1: Merge conversation state with the new message ─────────────────
+    state = dict(request.conversation_state or {})
+    merged_prefs = dict(request.preferences or {})
+
+    # Follow-up: merge new explicit filters into accumulated state,
+    # giving priority to anything the user says in the new message.
+    if request.is_followup and state:
+        # Carry forward accumulated filters, but let new prefs override
+        for k, v in state.get("filters", {}).items():
+            if k not in merged_prefs and v:
+                merged_prefs[k] = v
+
+    # ── Step 2: NLP — classify intent from the composed query ─────────────────
+    # For follow-ups, prepend relevant prior context to improve classification
+    nlp_query = request.message
+    if request.is_followup and state.get("last_query"):
+        # Build a composite query that includes key prior context
+        prior_domain = state.get("intent", "")
+        nlp_query = f"{state.get('last_query', '')} {request.message}"
+
+    try:
+        nlp_result = classify_intent(nlp_query)
+    except Exception:
+        logger.exception("NLP failed on /chat")
+        return error_response(500, "NLP_ERROR", "We couldn't process your request. Please try again.")
+
+    intent = nlp_result["intent"]
+
+    # If the user explicitly selected a category (domain button),
+    # use that as the authoritative routing signal.
+    effective_category = request.category
+
+    # If intent changed domain significantly from prior state and no
+    # category override was given, clear incompatible filters.
+    prior_intent = state.get("intent", "")
+    DOMAIN_GROUPS = {
+        "employment": {"employment", "education"},
+        "legal": {"legal", "domestic_violence"},
+        "health": {"healthcare", "counselling"},
+        "safety": {"emergency", "shelter", "domestic_violence"},
+        "finance": {"financial_support", "government_scheme"},
+    }
+    def _domain_group(i: str) -> str:
+        for g, members in DOMAIN_GROUPS.items():
+            if i in members:
+                return g
+        return i
+
+    if (prior_intent and intent != prior_intent and
+            _domain_group(intent) != _domain_group(prior_intent) and
+            not effective_category):
+        # Domain shift — clear filters that don't apply to the new domain
+        for key in ("experience_filter", "work_mode_filter", "employment_type_filter", "delivery_mode_filter"):
+            merged_prefs.pop(key, None)
+
+    # ── Step 3: Route to the correct category service ─────────────────────────
+    raw_resources, safety_note = route_query(
+        intent=intent,
+        db=db,
+        category=effective_category,
+        preferences=merged_prefs,
+    )
+
+    # ── Step 4: Run the recommendation pipeline ───────────────────────────────
+    support_req = SupportRequest(
+        message=request.message,
+        category=effective_category,
+        preferences=merged_prefs,
+        language=request.language,
+    )
+    response = _run_pipeline(support_req, raw_resources, intent, "chat")
+    if isinstance(response, JSONResponse):
+        return response
+
+    # ── Step 5: Apply safety note if present ──────────────────────────────────
+    if safety_note and response.recommendations:
+        first = response.recommendations[0]
+        first.reason = safety_note + " | " + (first.reason or "")
+
+    return response

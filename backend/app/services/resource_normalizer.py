@@ -69,7 +69,8 @@ NORMALIZED_KEYS: tuple[str, ...] = (
 # "keywords" is an internal field carried alongside the normalized dict
 # so that _dict_to_orm() in routes.py can forward it to the TF-IDF scorer.
 # It is NOT part of the common format and is NOT included in NORMALIZED_KEYS.
-_INTERNAL_KEYS = ("keywords",)
+# Structured filter fields are also carried internally for the same reason.
+_INTERNAL_KEYS = ("keywords", "experience_level", "work_mode", "employment_type")
 
 
 # ── ORM row → normalized dict ─────────────────────────────────────────────────
@@ -121,6 +122,10 @@ def orm_to_normalized(
 
     # Attach keywords as an internal field (not part of the canonical format)
     base["keywords"] = resource.keywords or ""
+    # Attach structured filter metadata as internal fields for service-layer filtering
+    base["experience_level"] = getattr(resource, "experience_level", None)
+    base["work_mode"]        = getattr(resource, "work_mode", None)
+    base["employment_type"]  = getattr(resource, "employment_type", None)
     return base
 
 

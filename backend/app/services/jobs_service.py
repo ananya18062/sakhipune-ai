@@ -58,6 +58,7 @@ from app.services.api_clients.base_client import (
     normalize_resource,
 )
 from app.services.resource_normalizer import orm_to_normalized as _orm_to_normalized
+from app.services.filter_utils import apply_job_filters
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -106,21 +107,33 @@ def _load_jobs_from_db(db: Session) -> list[dict[str, Any]]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def get_job_resources(db: Session) -> list[dict[str, Any]]:
-    """Return all verified Employment resources, normalized to the common format.
+def get_job_resources(
+    db: Session,
+    *,
+    experience_filter: str | None = None,
+    work_mode_filter: str | None = None,
+    employment_type_filter: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return verified Employment resources with optional structured filtering.
 
     Flow:
       1. If JOBS_API_URL is configured, attempt a live fetch and normalize.
       2. On any transport/parse/validation failure, fall back to PostgreSQL.
       3. If JOBS_API_URL is not configured, go directly to PostgreSQL.
-      4. Database results are always marked is_live=False.
+      4. Apply structured filters (AND logic) before returning.
+      5. Database results are always marked is_live=False.
 
-    Never raises — failures are logged and an empty list (not a crash)
-    is returned so the recommendation pipeline degrades gracefully.
+    Filter semantics:
+      • experience_filter=None  → show all experience levels
+      • work_mode_filter="remote" → show only explicitly-remote resources;
+        resources with unknown work_mode are excluded.
+      • employment_type_filter=None → show all employment types
+
+    Never raises — failures are logged and an empty list is returned.
     """
     if _client:
         try:
-            return fetch_with_fallback(
+            raw = fetch_with_fallback(
                 _client,
                 path="",
                 source="Jobs API",
@@ -129,18 +142,38 @@ def get_job_resources(db: Session) -> list[dict[str, Any]]:
             )
         except Exception:
             logger.exception("Unexpected error in jobs live fetch; using DB fallback")
+            raw = _load_jobs_from_db(db)
+    else:
+        raw = _load_jobs_from_db(db)
 
-    return _load_jobs_from_db(db)
+    return apply_job_filters(
+        raw,
+        experience_filter=experience_filter,
+        work_mode_filter=work_mode_filter,
+        employment_type_filter=employment_type_filter,
+    )
 
 
-def get_women_job_resources(db: Session) -> list[dict[str, Any]]:
+def get_women_job_resources(
+    db: Session,
+    *,
+    experience_filter: str | None = None,
+    work_mode_filter: str | None = None,
+    employment_type_filter: str | None = None,
+) -> list[dict[str, Any]]:
     """Return Employment resources particularly relevant to women job-seekers.
 
     Filters the full Employment list to entries whose name or description
-    contains women-specific keywords.  Falls back to the full list if the
-    filter produces no results (safe for sparse data).
+    contains women-specific keywords, then applies structured filters.
+    Falls back to the full filtered list if the women-keyword filter produces
+    no results.
     """
-    all_jobs = get_job_resources(db)
+    all_jobs = get_job_resources(
+        db,
+        experience_filter=experience_filter,
+        work_mode_filter=work_mode_filter,
+        employment_type_filter=employment_type_filter,
+    )
     women_jobs = [
         r for r in all_jobs
         if any(
@@ -151,13 +184,23 @@ def get_women_job_resources(db: Session) -> list[dict[str, Any]]:
     return women_jobs if women_jobs else all_jobs
 
 
-def get_all_employment_resources(db: Session) -> list[dict[str, Any]]:
-    """Convenience alias for get_job_resources().
+def get_all_employment_resources(
+    db: Session,
+    preferences: dict | None = None,
+) -> list[dict[str, Any]]:
+    """Convenience alias for get_job_resources() with preferences unpacking.
 
-    Provides a single named entry point for routes that need all
-    employment resources regardless of women-specificity.
+    Accepts the ``preferences`` dict from the recommendation pipeline and
+    unpacks filter keys before delegating to get_job_resources().  This
+    keeps the category_router call-site unchanged.
     """
-    return get_job_resources(db)
+    prefs = preferences or {}
+    return get_job_resources(
+        db,
+        experience_filter=prefs.get("experience_filter"),
+        work_mode_filter=prefs.get("work_mode_filter"),
+        employment_type_filter=prefs.get("employment_type_filter"),
+    )
 
 
 def describe_job_sources() -> dict[str, Any]:

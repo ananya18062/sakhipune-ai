@@ -200,7 +200,7 @@ def route_query(
                         merged.append(r)
             return merged, safety_note
 
-        if fn_name == "get_all_internship_resources":
+        if fn_name in ("get_all_internship_resources", "get_all_employment_resources"):
             return _get_fn(fn_name)(db, preferences=preferences), safety_note
 
         return _get_fn(fn_name)(db), safety_note

@@ -44,6 +44,10 @@ const CATEGORY_QUESTIONS = {
         { id: "scheme_type", label: "What type of scheme or support are you looking for?", options: ["Women\u2019s support", "Education", "Employment", "Financial assistance", "Other"] },
         { id: "eligibility_help", label: "What would you like help with?", options: ["Finding a suitable scheme", "Checking eligibility", "Understanding how to apply", "General information"] },
     ],
+    entrepreneurship: [
+        { id: "business_type", label: "What type of business are you interested in?", options: ["Home-based", "Retail or trade", "Service or skill-based", "Technology", "Other"] },
+        { id: "support_type", label: "What kind of support are you looking for?", options: ["Funding or loan", "Training or skill development", "Government scheme", "Mentorship", "General information"] },
+    ],
 };
 
 function getCategoryKey(category) {
@@ -59,6 +63,8 @@ function getCategoryKey(category) {
         safety_and_emergency: "safety",
         government_schemes: "government_scheme",
         financial_support: "financial_support",
+        entrepreneurship_and_self_employment: "entrepreneurship",
+        entrepreneurship: "entrepreneurship",
     };
 
     return aliases[normalizedCategory] || normalizedCategory;
@@ -79,6 +85,7 @@ const CATEGORY_ICONS = {
     financial_support: "\u20B9",
     shelter: "\u{1F3E0}",
     government_scheme: "\u{1F3DB}",
+    entrepreneurship: "\u{1F4BC}",
 };
 
 function renderQuestions(category, container) {

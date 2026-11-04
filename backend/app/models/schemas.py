@@ -43,6 +43,41 @@ class SupportRequest(BaseModel):
     )
     language: Optional[str] = Field(default=None, description="Language name or code, e.g. 'English'")
 
+    # ── Structured filter parameters ─────────────────────────────────────────
+    # Sent directly from the frontend filter dropdowns.
+    # Values must match the controlled vocabulary in database/models.py.
+    # None / missing = "no filter applied" (show all results).
+
+    experience_filter: Optional[str] = Field(
+        default=None,
+        description=(
+            "Experience level filter for jobs/internships. "
+            "One of: fresher, less_than_1, 1_2_years, 3_5_years, 6_10_years, more_than_10, any. "
+            "Omit or set to null to show all."
+        ),
+    )
+    work_mode_filter: Optional[str] = Field(
+        default=None,
+        description=(
+            "Work mode filter. One of: remote, hybrid, on_site. "
+            "Omit or set to null to show all work modes."
+        ),
+    )
+    employment_type_filter: Optional[str] = Field(
+        default=None,
+        description=(
+            "Employment type filter. One of: full_time, part_time, contract, "
+            "apprenticeship, self_employment. Omit or set to null to show all."
+        ),
+    )
+    delivery_mode_filter: Optional[str] = Field(
+        default=None,
+        description=(
+            "Delivery mode for education resources. One of: online, offline, hybrid. "
+            "Omit or set to null to show all."
+        ),
+    )
+
     @field_validator("message")
     @classmethod
     def support_message_must_not_be_empty(cls, value: str) -> str:
@@ -100,6 +135,15 @@ class SupportRequest(BaseModel):
         if normalized not in language_aliases:
             raise ValueError("language must be English, Hindi, or Marathi")
         return language_aliases[normalized]
+
+    @field_validator("experience_filter", "work_mode_filter", "employment_type_filter", "delivery_mode_filter")
+    @classmethod
+    def filter_values_are_safe(cls, value: Optional[str]) -> Optional[str]:
+        """Strip and lowercase filter values; return None for empty strings."""
+        if value is None:
+            return None
+        cleaned = value.strip().lower()
+        return cleaned if cleaned else None
 
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -189,6 +233,35 @@ class RecommendationAPIResponse(BaseModel):
     confidence: float
     match_score: float = Field(default=0.0, description="Top ranking score, not a probability")
     recommendations: list[RecommendationItem]
+
+
+class ConversationTurn(BaseModel):
+    """One turn in the conversation history sent from the frontend."""
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str = Field(..., description="Message text")
+
+
+class ChatRequest(BaseModel):
+    """
+    Request body for POST /api/chat.
+    Supports follow-up queries by carrying structured conversation state.
+    """
+    message: str = Field(..., description="The current user message")
+    category: Optional[str] = Field(default=None, description="Selected domain/category key")
+    language: Optional[str] = Field(default=None, description="Language code")
+    preferences: Optional[Dict[str, Any]] = Field(default=None, description="Accumulated preference answers")
+    conversation_state: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured state carried between turns: intent, filters, keywords"
+    )
+    is_followup: bool = Field(default=False, description="True when this amends a previous query")
+
+    @field_validator("message")
+    @classmethod
+    def chat_message_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("message must not be empty")
+        return value.strip()
 
 
 class ErrorResponse(BaseModel):
