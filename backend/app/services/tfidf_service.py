@@ -27,13 +27,21 @@ def _field_value(resource: Any, field: str) -> str:
 def build_resource_text(resource: Any) -> str:
     """Build searchable text from the resource fields used for matching.
 
+    Keywords are repeated to give them higher TF weight relative to the
+    description, which contains many generic stop-word-adjacent terms.
     Location, contact, language, and identifiers are intentionally excluded.
     """
-    return " ".join(
-        _field_value(resource, field)
-        for field in RESOURCE_TEXT_FIELDS
-        if _field_value(resource, field)
-    )
+    name = _field_value(resource, "name")
+    category = _field_value(resource, "category")
+    description = _field_value(resource, "description")
+    keywords = _field_value(resource, "keywords")
+
+    # Replace comma-separated keywords with space-separated tokens
+    # and repeat them so they get higher TF weight in the vectorizer
+    kw_text = " ".join(k.strip() for k in keywords.split(",") if k.strip())
+
+    parts = [p for p in [name, category, description, kw_text, kw_text] if p]
+    return " ".join(parts)
 
 
 def _clean_documents(documents: Iterable[Any]) -> list[str]:

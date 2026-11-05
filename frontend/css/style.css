@@ -900,3 +900,102 @@ footer {
   .resource-card__actions { flex-direction: column; }
   .resource-card__action { width: 100%; text-align: center; }
 }
+
+/* ── Active filter chips ───────────────────────────── */
+
+.active-filters-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.active-filters-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  background: rgba(91, 49, 93, 0.1);
+  color: var(--plum);
+  font-size: 0.74rem;
+  font-weight: 600;
+  border: 1px solid rgba(91, 49, 93, 0.2);
+}
+
+.filter-chip__text {
+  line-height: 1;
+}
+
+.filter-chip__remove {
+  border: 0;
+  background: transparent;
+  color: var(--plum);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--transition);
+}
+
+.filter-chip__remove:hover,
+.filter-chip__remove:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--plum);
+  outline-offset: 1px;
+  border-radius: 50%;
+}
+
+.filter-chip--clear {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--line);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.filter-chip--clear:hover,
+.filter-chip--clear:focus-visible {
+  background: var(--error-bg);
+  color: var(--error);
+  border-color: var(--error);
+  outline: 2px solid var(--error);
+  outline-offset: 2px;
+}
+
+/* ── Question hint text ────────────────────────────── */
+
+.question-hint {
+  margin: -8px 0 14px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* ── Skip option styling ───────────────────────────── */
+
+.question-option--skip {
+  border-style: dashed;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.question-option--skip:has(input:checked) {
+  border-color: var(--muted);
+  background: rgba(112, 107, 120, 0.08);
+  color: var(--muted);
+}

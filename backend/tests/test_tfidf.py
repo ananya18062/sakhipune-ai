@@ -27,11 +27,11 @@ class TestBuildResourceText:
 
         result = build_resource_text(resource)
 
+        # Keywords are comma-split, space-joined, and repeated for TF weight boost
         assert result == (
             "Pune Women Skill Centre Employment "
-            "Career and job training support. job, career, skill"
+            "Career and job training support. job career skill job career skill"
         )
-        assert "Pune" not in result.split()[-1:]
         assert "not-for-vector-search@example.org" not in result
 
     def test_supports_resource_objects(self):
@@ -42,7 +42,7 @@ class TestBuildResourceText:
             keywords="law, advice",
         )
 
-        assert build_resource_text(resource) == "Legal Aid Legal Rights guidance law, advice"
+        assert build_resource_text(resource) == "Legal Aid Legal Rights guidance law advice law advice"
 
     def test_empty_resource_returns_empty_text(self):
         assert build_resource_text({}) == ""

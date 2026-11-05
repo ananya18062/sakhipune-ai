@@ -69,7 +69,110 @@ function resetConversation() {
     input.value = "";
     clearValidationError();
     resultsSection.replaceChildren();
+    const existingBar = document.getElementById("active-filters-bar");
+    if (existingBar) existingBar.remove();
     renderChatHistory();
+}
+
+// ── Active filter display ─────────────────────────────────────────────────────
+// Shows a chip bar of current active filters below the query card.
+// Each chip has a × button to remove that specific filter.
+
+const FILTER_LABELS = {
+    work_mode_filter: { remote: "Remote", hybrid: "Hybrid", on_site: "On-site" },
+    experience_filter: { fresher: "Fresher", "1_2_years": "1–2 yrs exp", "3_5_years": "3–5 yrs exp", any: "Any level" },
+    employment_type_filter: { full_time: "Full-time", part_time: "Part-time", contract: "Contract", apprenticeship: "Internship/Apprenticeship", self_employment: "Self-employment" },
+    scheme_type: { government: "Government schemes" },
+    cost_preference: { free: "Free only" },
+};
+
+const FILTER_NAMES = {
+    work_mode_filter: "Work mode",
+    experience_filter: "Experience",
+    employment_type_filter: "Employment type",
+    scheme_type: "Scheme type",
+    cost_preference: "Cost",
+    interest_area: "Field",
+    support_type: "Support type",
+};
+
+function getFilterChipLabel(key, value) {
+    if (FILTER_LABELS[key] && FILTER_LABELS[key][value]) return FILTER_LABELS[key][value];
+    const name = FILTER_NAMES[key] || key.replace(/_/g, " ");
+    return name + ": " + value;
+}
+
+function renderActiveFilters() {
+    let bar = document.getElementById("active-filters-bar");
+    const filters = conversationState.accumulatedFilters;
+
+    // Collect displayable filters (skip internal keys like _last_intent)
+    const displayable = Object.entries(filters).filter(function (entry) {
+        return !entry[0].startsWith("_") && entry[1];
+    });
+
+    // Remove bar if no filters
+    if (displayable.length === 0) {
+        if (bar) bar.remove();
+        return;
+    }
+
+    if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "active-filters-bar";
+        bar.className = "active-filters-bar";
+        bar.setAttribute("aria-label", "Active search filters");
+        // Insert just above the query form
+        queryCard.insertBefore(bar, form);
+    }
+
+    bar.replaceChildren();
+
+    const label = document.createElement("span");
+    label.className = "active-filters-label";
+    label.textContent = "Active filters:";
+    bar.appendChild(label);
+
+    displayable.forEach(function (entry) {
+        const key = entry[0];
+        const value = entry[1];
+        const chip = document.createElement("span");
+        chip.className = "filter-chip";
+
+        const chipText = document.createElement("span");
+        chipText.className = "filter-chip__text";
+        chipText.textContent = getFilterChipLabel(key, value);
+        chip.appendChild(chipText);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "filter-chip__remove";
+        removeBtn.setAttribute("aria-label", "Remove filter: " + getFilterChipLabel(key, value));
+        removeBtn.textContent = "\u00D7";
+        removeBtn.addEventListener("click", function () {
+            delete conversationState.accumulatedFilters[key];
+            // Also remove from selectedAnswers if it came from there
+            const answerKey = Object.keys(conversationState.selectedAnswers).find(function (k) {
+                return k === key || k.replace("_filter", "") === key;
+            });
+            if (answerKey) delete conversationState.selectedAnswers[answerKey];
+            renderActiveFilters();
+        });
+        chip.appendChild(removeBtn);
+        bar.appendChild(chip);
+    });
+
+    // Clear all button
+    const clearAll = document.createElement("button");
+    clearAll.type = "button";
+    clearAll.className = "filter-chip filter-chip--clear";
+    clearAll.textContent = "Clear all";
+    clearAll.addEventListener("click", function () {
+        conversationState.accumulatedFilters = {};
+        conversationState.selectedAnswers = {};
+        renderActiveFilters();
+    });
+    bar.appendChild(clearAll);
 }
 
 // ── Language ──────────────────────────────────────────────────────────────────
@@ -194,10 +297,23 @@ continueBtn.addEventListener("click", function () {
     questionForm.addEventListener("questions-complete", function (event) {
         const questions = getQuestionsForCategory(conversationState.selectedCategory.name);
         const answers = event.detail.answers;
-        if (!validateAnswers(questions, answers)) return;
+        const catKey = event.detail.categoryKey || getCategoryKey(conversationState.selectedCategory.name);
         conversationState.selectedAnswers = answers;
+
+        // Extract typed backend filter fields from answers (e.g. work_mode_filter, experience_filter)
+        const extractedFilters = {};
+        Object.keys(answers).forEach(function (questionId) {
+            const filter = getFilterFromAnswer(catKey, questionId, answers[questionId]);
+            if (filter) {
+                extractedFilters[filter.key] = filter.value;
+            }
+        });
+        // Merge into accumulated filters
+        Object.assign(conversationState.accumulatedFilters, extractedFilters);
+
         input.value = buildSupportQuery(conversationState.selectedCategory.query, answers);
         clearValidationError();
+        renderActiveFilters();
         input.focus();
         document.getElementById("query-heading").scrollIntoView({ behavior: "smooth", block: "center" });
     });
@@ -272,8 +388,8 @@ form.addEventListener("submit", async function (event) {
     if (isFollowUp) {
         // Merge new filters into accumulated state
         Object.assign(conversationState.accumulatedFilters, newFilters);
-    } else if (!isEditing) {
-        // New query — keep category but reset filters unless they come from questions
+        renderActiveFilters();
+    } else if (!isEditing) {        // New query — keep category but reset filters unless they come from questions
         conversationState.accumulatedFilters = Object.assign({}, newFilters);
     }
 
@@ -372,6 +488,7 @@ async function submitChatRequest(request, userMessage, isEditing, isFollowUp) {
         setLoadingState(false);
         input.value = "";
         renderChatHistory();
+        renderActiveFilters();
         // Scroll to latest message
         const chatContainer = document.getElementById("chat-container");
         if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;

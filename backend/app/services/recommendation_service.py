@@ -53,6 +53,20 @@ DEFAULT_WEIGHTS = {
     "language": 0.05,
 }
 
+# When all candidates share the same category (intent_score = 1.0 for all),
+# the intent weight adds nothing — it just flattens every score to the same
+# base value and prevents similarity from differentiating results.
+# Within-category mode boosts similarity so the actual query content matters.
+WITHIN_CATEGORY_WEIGHTS = {
+    "intent": 0.0,       # all = 1.0, contributes nothing, dropped
+    "similarity": 0.50,  # query↔resource text match is the primary signal
+    "keyword_overlap": 0.25,  # direct token overlap (query vs full kw+desc)
+    "category": 0.0,     # all same category, no signal
+    "preference": 0.15,  # user-specified preferences still matter
+    "location": 0.05,
+    "language": 0.05,    # language preference preserved as tiebreaker
+}
+
 PREFERENCE_KEYS = {
     "field", "interest_area", "education_level", "experience", "experience_level",
     "support_type", "work_preference", "work_type", "urgency", "assistance_type",
@@ -82,6 +96,7 @@ def calculate_final_score(
     location_score: float = 0.0,
     language_score: float = 0.0,
     weights: dict[str, float] | None = None,
+    keyword_overlap_score: float = 0.0,
 ) -> float:
     """Combine explainable recommendation signals with configurable weights."""
     if isinstance(category_score, dict) and weights is None:
@@ -98,6 +113,7 @@ def calculate_final_score(
         + preference_score * active_weights.get("preference", 0.0)
         + location_score * active_weights.get("location", 0.0)
         + language_score * active_weights.get("language", 0.0)
+        + keyword_overlap_score * active_weights.get("keyword_overlap", 0.0)
     ) / weight_total
     return round(max(0.0, min(1.0, score)), 4)
 
@@ -108,6 +124,33 @@ def _match_score(value: str | None, target: str | None) -> float:
     value_tokens = set(get_tokens(value))
     target_tokens = set(get_tokens(target))
     return 1.0 if value_tokens and value_tokens.intersection(target_tokens) else 0.0
+
+
+def _keyword_overlap_score(query: str, resource: SupportResource) -> float:
+    """Direct token-level overlap between query tokens and resource keywords+description.
+
+    This bypasses TF-IDF weighting to give a raw relevance signal based on
+    how many query terms appear anywhere in the resource's searchable text.
+    Uses the full keyword string (now properly loaded from CSV) and description.
+
+    Returns a 0–1 fraction: matched_query_tokens / total_query_tokens.
+    A score of 0 means no query term appears in the resource at all.
+    """
+    query_tokens = set(get_tokens(query))
+    if not query_tokens:
+        return 0.0
+
+    # Build a rich set of resource tokens from keywords + description
+    kw_tokens = set(get_tokens(getattr(resource, "keywords", "") or ""))
+    desc_tokens = set(get_tokens(getattr(resource, "description", "") or ""))
+    name_tokens = set(get_tokens(getattr(resource, "name", "") or ""))
+    resource_tokens = kw_tokens | desc_tokens | name_tokens
+
+    if not resource_tokens:
+        return 0.0
+
+    matched = query_tokens.intersection(resource_tokens)
+    return round(len(matched) / len(query_tokens), 4)
 
 
 def calculate_location_score(resource_location: str | None, user_location: str | None = "Pune") -> float:
@@ -182,7 +225,13 @@ def rank_resources_with_scores(
     weights: dict[str, float] | None = None,
     limit: int = 5,
 ) -> list[dict]:
-    """Return ranked resource details with transparent score and reason."""
+    """Return ranked resource details with transparent score and reason.
+
+    When all candidates share the same category (within-category mode),
+    WITHIN_CATEGORY_WEIGHTS are used so TF-IDF similarity and keyword overlap
+    can actually differentiate resources rather than being drowned out by the
+    flat intent_score=1.0 baseline.
+    """
     if not resources or limit <= 0:
         return []
     usable = [(resource, build_resource_text(resource)) for resource in resources]
@@ -197,6 +246,14 @@ def rank_resources_with_scores(
 
     requested_intent = CATEGORY_TO_INTENT.get(_normalise_category(category), intent)
     expected_category = INTENT_TO_CATEGORY.get(requested_intent, "")
+
+    # Detect within-category mode: all candidates share the same category
+    unique_categories = {(resource.category or "").strip().lower() for resource, _ in usable}
+    is_within_category = len(unique_categories) == 1
+
+    # Use caller-supplied weights, or auto-select based on query scope
+    active_weights = weights or (WITHIN_CATEGORY_WEIGHTS if is_within_category else DEFAULT_WEIGHTS)
+
     scored_resources = []
     for index, (resource, _) in enumerate(usable):
         resource_category = (resource.category or "").strip().lower()
@@ -206,6 +263,7 @@ def rank_resources_with_scores(
         selected_category = _normalise_category(category)
         category_score = _match_score(resource.category, selected_category.replace("_", " "))
         similarity_score = calculate_similarity(query_vector, resource_vectors[index])
+        keyword_overlap = _keyword_overlap_score(query, resource)
         preference_score = _preference_score(resource, preferences)
         requested_location = location or (preferences or {}).get("location") or "Pune"
         requested_language = language or (preferences or {}).get("language")
@@ -221,28 +279,44 @@ def rank_resources_with_scores(
             category_score,
             location_score,
             language_score,
-            weights,
+            active_weights,
+            keyword_overlap_score=keyword_overlap,
         )
-        reasons = []
-        if intent_score:
-            reasons.append("matches your support need")
-        if category_score:
-            reasons.append("matches your selected category")
-        if similarity_score >= 0.2:
-            reasons.append("matches your request text")
-        if preference_score:
-            reasons.append("matches your preferences")
-        if location_score:
-            reasons.append("matches your location preference")
-        if language_score:
-            reasons.append("matches your language preference")
-        reason = "Recommended because it " + ", ".join(reasons[:2] or ["is relevant to your request"]) + "."
-        scored_resources.append((final_score, similarity_score, resource, reason))
 
-    scored_resources.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        # Build an evidence-based explanation
+        reasons = []
+        if keyword_overlap >= 0.3:
+            # Find which query tokens matched the resource
+            query_tokens = set(get_tokens(query))
+            kw_tokens = set(get_tokens(getattr(resource, "keywords", "") or ""))
+            desc_tokens = set(get_tokens(getattr(resource, "description", "") or ""))
+            matched = query_tokens.intersection(kw_tokens | desc_tokens)
+            if matched:
+                sample = sorted(matched)[:3]
+                reasons.append("directly matches: " + ", ".join(sample))
+        if similarity_score >= 0.15:
+            reasons.append("matches your request text")
+        if preference_score >= 0.2:
+            reasons.append("matches your preferences")
+        if location_score >= 0.6:
+            reasons.append("located in Pune")
+        if intent_score and not is_within_category:
+            reasons.append("matches your support need")
+        if language_score:
+            reasons.append("available in your preferred language")
+
+        if reasons:
+            reason = "Recommended because it " + ", ".join(reasons[:3]) + "."
+        else:
+            reason = "Recommended as a relevant resource in this category."
+
+        scored_resources.append((final_score, keyword_overlap, similarity_score, resource, reason))
+
+    # Sort by final score, then keyword_overlap as tiebreaker, then TF-IDF similarity
+    scored_resources.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
     return [
         {"resource": resource, "score": score, "reason": reason}
-        for score, _, resource, reason in scored_resources[:limit]
+        for score, _, _, resource, reason in scored_resources[:limit]
     ]
 
 
