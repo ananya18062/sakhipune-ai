@@ -69,10 +69,11 @@ def _dict_to_orm(d: dict):
     # (tfidf_service.build_resource_text) reads real keyword tokens rather
     # than an empty string when processing category-service results
     r.keywords    = d.get("keywords", "")
-    # Structured filter metadata — preserved for service-layer filter logic
     r.experience_level = d.get("experience_level")
     r.work_mode        = d.get("work_mode")
     r.employment_type  = d.get("employment_type")
+    r.apply_url        = d.get("apply_url") or None
+    r.action_label     = d.get("action_label") or None
     return r
 
 
@@ -81,6 +82,7 @@ def _build_items(pipeline: dict, name_to_meta: dict) -> list[RecommendationItem]
     for item in pipeline["recommendations"]:
         base = resource_to_dict(item["resource"])
         meta = name_to_meta.get(base["name"], {})
+        normed = orm_to_normalized(item["resource"])
         items.append(RecommendationItem(
             id=base.get("id") or 0,
             name=base["name"],
@@ -91,11 +93,13 @@ def _build_items(pipeline: dict, name_to_meta: dict) -> list[RecommendationItem]
             language=base.get("language"),
             score=item["score"],
             reason=item["reason"],
-            url=meta.get("url") or meta.get("contact"),
-            source=meta.get("source"),
-            source_type=meta.get("source_type"),
+            url=meta.get("url") or normed.get("url") or meta.get("contact"),
+            source=meta.get("source") or normed.get("source"),
+            source_type=meta.get("source_type") or normed.get("source_type"),
             last_updated=meta.get("last_updated"),
             is_live=meta.get("is_live", False),
+            apply_url=normed.get("apply_url") or None,
+            action_label=normed.get("action_label") or None,
         ))
     return items
 
@@ -247,6 +251,8 @@ def recommend(user_query: SupportRequest, db: Session = Depends(get_db)) -> Reco
             source_type=normed.get("source_type"),
             last_updated=normed.get("last_updated"),
             is_live=normed.get("is_live", False),
+            apply_url=normed.get("apply_url") or None,
+            action_label=normed.get("action_label") or None,
         ))
     return RecommendationAPIResponse(
         message=user_query.message,

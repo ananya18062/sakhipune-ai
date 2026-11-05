@@ -69,6 +69,17 @@ class SupportResource(Base):
     # Comma-separated keywords for matching, e.g. "job,career,skill"
     keywords = Column(Text, nullable=True)
 
+    # ── Direct action links ───────────────────────────────────────────────────
+    # apply_url: the direct application, registration, or service-access page.
+    # This is intentionally separate from contact — contact may be a phone/email
+    # while apply_url is always an https:// link to the action page.
+    # NULL means no verified application link exists for this resource.
+    apply_url = Column(String(512), nullable=True)
+
+    # action_label: the button text for apply_url, e.g. "Apply Now", "Register Here".
+    # NULL falls back to a category-derived default in the API layer.
+    action_label = Column(String(80), nullable=True)
+
     # ── Structured filter metadata ────────────────────────────────────────────
     # These columns enable accurate filtering without keyword guessing.
     # NULL means the information is genuinely unknown — never default to a value.

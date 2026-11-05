@@ -664,6 +664,32 @@ function buildChatActions() {
 }
 
 // ── Resource card builder ─────────────────────────────────────────────────────
+// Category → default action label (fallback when action_label not in DB)
+const CATEGORY_ACTION_LABELS = {
+    "Government Schemes":        "Check Eligibility",
+    "Internships":               "Apply for Internship",
+    "Employment":                "Apply Now",
+    "Education":                 "Apply / Enrol",
+    "Healthcare":                "Find Service",
+    "Legal Support":             "Get Legal Assistance",
+    "Emergency":                 "Contact Helpline",
+    "Shelters":                  "Contact Shelter",
+    "Counselling":               "Book Counselling",
+    "Financial Support":         "Apply for Programme",
+    "Domestic Violence Support": "Contact Support",
+};
+
+function getActionLabel(resource) {
+    if (resource.action_label) return resource.action_label;
+    return CATEGORY_ACTION_LABELS[resource.category] || "Get Support";
+}
+
+function isSafeUrl(url) {
+    if (!url || typeof url !== "string") return false;
+    const trimmed = url.trim().toLowerCase();
+    return trimmed.startsWith("https://") || trimmed.startsWith("http://");
+}
+
 function buildResourceCard(resource) {
     const card = document.createElement("div");
     card.className = "result-card resource-card";
@@ -674,11 +700,20 @@ function buildResourceCard(resource) {
     name.textContent = resource.name || "Unnamed Resource";
     card.appendChild(name);
 
-    // Category badge
+    // Category + location row
+    const metaRow = document.createElement("div");
+    metaRow.className = "resource-card__meta";
     const badge = document.createElement("span");
     badge.className = "resource-card__badge";
     badge.textContent = resource.category || "";
-    card.appendChild(badge);
+    metaRow.appendChild(badge);
+    if (resource.location) {
+        const loc = document.createElement("span");
+        loc.className = "resource-card__location";
+        loc.textContent = "📍 " + resource.location;
+        metaRow.appendChild(loc);
+    }
+    card.appendChild(metaRow);
 
     // Match score
     if (resource.score != null) {
@@ -704,58 +739,66 @@ function buildResourceCard(resource) {
         card.appendChild(reason);
     }
 
-    // Location
-    if (resource.location) card.appendChild(buildDetailRow("📍", resource.location));
+    // ── Action buttons row ────────────────────────────────────────────────────
+    // Layout: [Official Website]   [Apply Now / Register / Get Support]
+    const actions = document.createElement("div");
+    actions.className = "resource-card__actions";
 
-    // Contact
-    if (resource.contact) {
-        card.appendChild(buildDetailRow("📞", resource.contact));
+    // A. Official Website button
+    const websiteUrl = resource.url || (resource.contact && isSafeUrl(resource.contact) ? resource.contact : null);
+    if (websiteUrl && isSafeUrl(websiteUrl)) {
+        const webBtn = document.createElement("a");
+        webBtn.className = "resource-card__action resource-card__action--website";
+        webBtn.href = websiteUrl;
+        webBtn.target = "_blank";
+        webBtn.rel = "noopener noreferrer";
+        webBtn.setAttribute("aria-label", "Official website for " + (resource.name || "this resource") + " (opens in new tab)");
+        webBtn.innerHTML = '<span aria-hidden="true">🌐</span> Official Website';
+        actions.appendChild(webBtn);
     }
+
+    // B. Apply / Register / Get Support button
+    if (resource.apply_url && isSafeUrl(resource.apply_url)) {
+        // Only show if apply_url is different from the website URL
+        const applyBtn = document.createElement("a");
+        applyBtn.className = "resource-card__action resource-card__action--apply";
+        applyBtn.href = resource.apply_url;
+        applyBtn.target = "_blank";
+        applyBtn.rel = "noopener noreferrer";
+        const label = getActionLabel(resource);
+        applyBtn.setAttribute("aria-label", label + " for " + (resource.name || "this resource") + " (opens in new tab)");
+        applyBtn.innerHTML = '<span aria-hidden="true">✅</span> ' + label;
+        actions.appendChild(applyBtn);
+    } else if (!websiteUrl && resource.contact) {
+        // No URL at all — show contact action
+        actions.appendChild(buildContactAction(resource.contact, resource.name));
+    }
+
+    // C. If only website available and no apply_url, show fallback contact action for phones
+    if (actions.children.length > 0 && resource.contact && !isSafeUrl(resource.contact)) {
+        actions.appendChild(buildContactAction(resource.contact, resource.name));
+    }
+
+    if (actions.children.length > 0) card.appendChild(actions);
 
     // Source type indicator
     if (resource.source_type) {
         const sourceTag = document.createElement("span");
         sourceTag.className = "resource-card__source-tag resource-card__source-tag--" + resource.source_type;
-        sourceTag.textContent = resource.source_type === "database" ? "Verified database" : resource.source_type;
+        sourceTag.textContent = resource.source_type === "database" ? "Verified database record" : resource.source_type;
         card.appendChild(sourceTag);
     }
-
-    // Actions row
-    const actions = document.createElement("div");
-    actions.className = "resource-card__actions";
-
-    // Website link (from url field if available, else contact if https)
-    const websiteUrl = resource.url || (resource.contact && /^https?:\/\//.test(resource.contact) ? resource.contact : null);
-    if (websiteUrl) {
-        const webLink = document.createElement("a");
-        webLink.className = "resource-card__action resource-card__action--primary";
-        webLink.href = websiteUrl;
-        webLink.target = "_blank";
-        webLink.rel = "noopener noreferrer";
-        webLink.textContent = "View Official Website";
-        actions.appendChild(webLink);
-    }
-
-    // Contact action
-    if (resource.contact && !websiteUrl) {
-        actions.appendChild(buildContactAction(resource.contact));
-    } else if (resource.contact && websiteUrl && resource.contact !== websiteUrl) {
-        // If both exist and contact is phone/email, show contact button too
-        if (!/^https?:\/\//.test(resource.contact)) {
-            actions.appendChild(buildContactAction(resource.contact));
-        }
-    }
-
-    if (actions.children.length > 0) card.appendChild(actions);
 
     return card;
 }
 
-function buildContactAction(contact) {
+function buildContactAction(contact, resourceName) {
     const action = document.createElement("a");
-    action.className = "resource-card__action";
-    action.textContent = "Contact Resource";
-    const trimmed = contact.trim();
+    action.className = "resource-card__action resource-card__action--contact";
+    const trimmed = (contact || "").trim();
+    const label = /^[+\d][\d\s().,-]{1,}$/.test(trimmed) ? "📞 Call Now" : "📧 Contact";
+    action.innerHTML = label;
+    action.setAttribute("aria-label", (label.replace(/[^a-zA-Z ]/g, "").trim()) + " " + (resourceName || "resource"));
     if (/^https?:\/\//i.test(trimmed)) {
         action.href = trimmed; action.target = "_blank"; action.rel = "noopener noreferrer";
     } else if (/^[+\d][\d\s().,-]{2,}$/.test(trimmed)) {

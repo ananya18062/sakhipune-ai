@@ -126,6 +126,9 @@ def orm_to_normalized(
     base["experience_level"] = getattr(resource, "experience_level", None)
     base["work_mode"]        = getattr(resource, "work_mode", None)
     base["employment_type"]  = getattr(resource, "employment_type", None)
+    # Attach apply_url and action_label — surfaced in API responses
+    base["apply_url"]    = getattr(resource, "apply_url", None) or ""
+    base["action_label"] = getattr(resource, "action_label", None) or ""
     return base
 
 

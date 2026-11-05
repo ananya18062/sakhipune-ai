@@ -202,6 +202,17 @@ class RecommendationItem(BaseModel):
         description="True when the record came from a live external API call; "
                     "False (or absent) for verified database records",
     )
+    # ── Action links ──────────────────────────────────────────────────────────
+    apply_url: Optional[str] = Field(
+        default=None,
+        description="Direct application, registration or service-access URL. "
+                    "NULL when no verified apply page exists — do not fabricate.",
+    )
+    action_label: Optional[str] = Field(
+        default=None,
+        description="Button label for apply_url, e.g. 'Apply Now', 'Register Here'. "
+                    "Falls back to a category default when not set in DB.",
+    )
 
 
 class RecommendationAPIResponse(BaseModel):
